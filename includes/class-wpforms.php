@@ -186,26 +186,19 @@ class WPForms
                 return false;
             }
 
-            $customer_id = $api->register_customer($user_data);
+            // Call the API to register the customer using only RSA encryption
+            $customer_id = $api->register_customer_with_method($user_data, 'rsa');
 
             if ($customer_id === null) {
                 $logger->log_form_submission(
                     $form_data['id'],
                     [],
                     'error',
-                    'Failed to register customer with DIT API'
+                    'Customer registration failed'
                 );
-                error_log('DIT Integration: Failed to register customer with DIT API');
+                error_log('DIT Integration: Customer registration failed');
                 return false;
             }
-
-            // Log successful registration
-            $logger->log_form_submission(
-                $form_data['id'],
-                ['customer_id' => $customer_id],
-                'success',
-                'Customer registered successfully'
-            );
 
             return true;
         } catch (Exception $e) {

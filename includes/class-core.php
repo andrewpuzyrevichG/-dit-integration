@@ -127,12 +127,36 @@ class Core
             if (!class_exists('DIT\\API')) {
                 error_log('DIT Integration: API class not found, trying to load manually');
                 $api_file = DIT_PLUGIN_DIR . 'includes/class-api.php';
+                error_log('DIT Integration: Looking for API file at: ' . $api_file);
+                error_log('DIT Integration: File exists: ' . (file_exists($api_file) ? 'Yes' : 'No'));
+
                 if (file_exists($api_file)) {
+                    error_log('DIT Integration: API file found, attempting to include');
+                    error_log('DIT Integration: File permissions: ' . decoct(fileperms($api_file)));
+                    error_log('DIT Integration: File size: ' . filesize($api_file) . ' bytes');
+                    error_log('DIT Integration: File readable: ' . (is_readable($api_file) ? 'Yes' : 'No'));
+
                     require_once $api_file;
                     error_log('DIT Integration: API file loaded manually');
+
+                    if (class_exists('DIT\\API')) {
+                        error_log('DIT Integration: API class exists after manual load');
+                    } else {
+                        error_log('DIT Integration: WARNING - API class still not found after manual load');
+                    }
                 } else {
                     error_log('DIT Integration: API file not found at: ' . $api_file);
+                    // List directory contents to debug
+                    $includes_dir = DIT_PLUGIN_DIR . 'includes/';
+                    if (is_dir($includes_dir)) {
+                        $files = scandir($includes_dir);
+                        error_log('DIT Integration: Files in includes directory: ' . implode(', ', $files));
+                    } else {
+                        error_log('DIT Integration: Includes directory does not exist: ' . $includes_dir);
+                    }
                 }
+            } else {
+                error_log('DIT Integration: API class already exists');
             }
 
             if (class_exists('DIT\\API')) {

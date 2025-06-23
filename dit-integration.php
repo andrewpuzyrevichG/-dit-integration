@@ -49,7 +49,77 @@ if (!defined('DIT_PLUGIN_FILE')) {
     error_log('DIT Integration: DIT_PLUGIN_FILE is defined: ' . DIT_PLUGIN_FILE);
 }
 
-// Verify class files exist
+// Autoloader for plugin classes
+spl_autoload_register(function ($class) {
+    // Check if the class is in our namespace
+    if (strpos($class, 'DIT\\') !== 0) {
+        return;
+    }
+
+    // Remove namespace from class name
+    $class_name = str_replace('DIT\\', '', $class);
+
+    // Convert class name to file name format
+    $file_name = 'class-' . strtolower(str_replace('_', '-', $class_name)) . '.php';
+
+    // Build possible file paths
+    $paths = [
+        DIT_PLUGIN_DIR . 'includes/' . $file_name,
+        DIT_PLUGIN_DIR . 'admin/' . $file_name
+    ];
+
+    // Debug logging (only in debug mode)
+    if (defined('WP_DEBUG') && WP_DEBUG) {
+        error_log('DIT Integration: Autoloader trying to load class: ' . $class);
+        error_log('DIT Integration: Looking for file: ' . $file_name);
+        error_log('DIT Integration: DIT_PLUGIN_DIR: ' . DIT_PLUGIN_DIR);
+    }
+
+    // Check each path and include the file if it exists
+    foreach ($paths as $file_path) {
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            error_log('DIT Integration: Checking path: ' . $file_path);
+            error_log('DIT Integration: File exists: ' . (file_exists($file_path) ? 'Yes' : 'No'));
+            if (file_exists($file_path)) {
+                error_log('DIT Integration: File permissions: ' . decoct(fileperms($file_path)));
+                error_log('DIT Integration: File size: ' . filesize($file_path) . ' bytes');
+                error_log('DIT Integration: File readable: ' . (is_readable($file_path) ? 'Yes' : 'No'));
+            }
+        }
+
+        if (file_exists($file_path)) {
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log('DIT Integration: Found file at: ' . $file_path);
+            }
+
+            // Try to include the file
+            try {
+                require_once $file_path;
+
+                if (defined('WP_DEBUG') && WP_DEBUG) {
+                    error_log('DIT Integration: File included successfully');
+                    if (class_exists($class)) {
+                        error_log('DIT Integration: Class ' . $class . ' loaded successfully');
+                    } else {
+                        error_log('DIT Integration: WARNING - Class ' . $class . ' not found after including file');
+                    }
+                }
+            } catch (Exception $e) {
+                error_log('DIT Integration: Exception while including file: ' . $e->getMessage());
+            } catch (Error $e) {
+                error_log('DIT Integration: Error while including file: ' . $e->getMessage());
+            }
+            return;
+        }
+    }
+
+    if (defined('WP_DEBUG') && WP_DEBUG) {
+        error_log('DIT Integration: File not found for class: ' . $class);
+        error_log('DIT Integration: Checked paths: ' . implode(', ', $paths));
+    }
+});
+
+// Verify class files exist (after autoloader registration)
 $class_files = [
     'includes/class-core.php',
     'includes/class-logger.php',
@@ -99,64 +169,6 @@ if (!file_exists($css_file)) {
     error_log('DIT Integration: CSS file does not exist: ' . $css_file);
 }
 
-// Autoloader for plugin classes
-spl_autoload_register(function ($class) {
-    // Check if the class is in our namespace
-    if (strpos($class, 'DIT\\') !== 0) {
-        return;
-    }
-
-    // Remove namespace from class name
-    $class_name = str_replace('DIT\\', '', $class);
-
-    // Convert class name to file name format
-    $file_name = 'class-' . strtolower(str_replace('_', '-', $class_name)) . '.php';
-
-    // Build possible file paths
-    $paths = [
-        DIT_PLUGIN_DIR . 'includes/' . $file_name,
-        DIT_PLUGIN_DIR . 'admin/' . $file_name
-    ];
-
-    // Debug logging (only in debug mode)
-    if (defined('WP_DEBUG') && WP_DEBUG) {
-        error_log('DIT Integration: Autoloader trying to load class: ' . $class);
-        error_log('DIT Integration: Looking for file: ' . $file_name);
-    }
-
-    // Check each path and include the file if it exists
-    foreach ($paths as $file_path) {
-        if (file_exists($file_path)) {
-            if (defined('WP_DEBUG') && WP_DEBUG) {
-                error_log('DIT Integration: Found file at: ' . $file_path);
-                error_log('DIT Integration: File permissions: ' . decoct(fileperms($file_path)));
-                error_log('DIT Integration: File size: ' . filesize($file_path) . ' bytes');
-            }
-
-            // Try to include the file
-            try {
-                require_once $file_path;
-
-                if (defined('WP_DEBUG') && WP_DEBUG) {
-                    error_log('DIT Integration: File included successfully');
-                    if (class_exists($class)) {
-                        error_log('DIT Integration: Class ' . $class . ' loaded successfully');
-                    }
-                }
-            } catch (Exception $e) {
-                error_log('DIT Integration: Exception while including file: ' . $e->getMessage());
-            } catch (Error $e) {
-                error_log('DIT Integration: Error while including file: ' . $e->getMessage());
-            }
-            return;
-        }
-    }
-
-    if (defined('WP_DEBUG') && WP_DEBUG) {
-        error_log('DIT Integration: File not found for class: ' . $class);
-    }
-});
-
 /**
  * Check if WPForms is active
  */
@@ -200,7 +212,8 @@ function dit_check_stripe()
         add_action('admin_notices', function () {
         ?>
             <div class="notice notice-warning">
-                <p><?php _e('DIT Integration: WPForms Stripe addon is not active. Payment processing will not be available.', 'dit-integration'); ?></p>
+                <p><?php _e('DIT Integration: WPForms Stripe addon is not active. Payment processing will not be available.', 'dit-integration'); ?>
+                </p>
             </div>
 <?php
         });

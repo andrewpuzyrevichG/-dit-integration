@@ -87,13 +87,14 @@ class Encryption
     public function encrypt_with_aes(string $data, string $aes_key, string $base64_iv): string
     {
         try {
-            if (strlen($aes_key) !== 32) {
+            // Check AES key length - use mb_strlen for binary data
+            if (mb_strlen($aes_key, '8bit') !== 32) {
                 throw new Exception('Invalid AES key length: must be 32 bytes');
             }
 
             // Decode base64 IV to get binary data
             $iv = base64_decode($base64_iv);
-            if ($iv === false || strlen($iv) !== 16) {
+            if ($iv === false || mb_strlen($iv, '8bit') !== 16) {
                 throw new Exception('Invalid IV format or length');
             }
 
@@ -119,12 +120,13 @@ class Encryption
     public function decrypt_with_aes(string $base64_encrypted, string $aes_key, string $base64_iv): string
     {
         try {
-            if (strlen($aes_key) !== 32) {
+            // Check AES key length - use mb_strlen for binary data
+            if (mb_strlen($aes_key, '8bit') !== 32) {
                 throw new Exception('Invalid AES key length: must be 32 bytes');
             }
 
             $iv = base64_decode($base64_iv);
-            if ($iv === false || strlen($iv) !== 16) {
+            if ($iv === false || mb_strlen($iv, '8bit') !== 16) {
                 throw new Exception('Invalid IV format or length');
             }
 
@@ -155,8 +157,8 @@ class Encryption
     public function encrypt_with_rsa(string $aes_key, string $rsa_public_key_base64): string
     {
         try {
-            // AES key must be raw binary 32 bytes
-            if (strlen($aes_key) !== 32) {
+            // AES key must be raw binary 32 bytes - use mb_strlen for binary data
+            if (mb_strlen($aes_key, '8bit') !== 32) {
                 throw new Exception('Invalid AES key length: must be 32 bytes of raw binary');
             }
 
@@ -370,12 +372,12 @@ class Encryption
         // Logging the raw key
         error_log("Entering the validate_rsa_key() method");
         error_log("RSA key raw base64: " . $rsa_public_key_base64);
-        error_log("RSA key length: " . strlen($rsa_public_key_base64));
+        error_log("RSA key length: " . mb_strlen($rsa_public_key_base64, '8bit'));
 
         // Try to decode and analyze
         $key_bin = base64_decode($rsa_public_key_base64, true);
         if ($key_bin !== false) {
-            error_log("Key decoded successfully. Length: " . strlen($key_bin) . " bytes");
+            error_log("Key decoded successfully. Length: " . mb_strlen($key_bin, '8bit') . " bytes");
         } else {
             error_log("Failed to decode base64 key");
             return false;

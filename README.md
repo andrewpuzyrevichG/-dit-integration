@@ -275,24 +275,38 @@ php test-simple-encryption-wrapper.php
 
 ## Known Issues
 
-### 1. API Format Mismatch
-**Problem:** Server expects `registerUserB64` field, but code sends `EncryptionWrapperDIT` structure.
+### 1. Base64 Decoding Error
+**Problem:** Server cannot decode Base64 string due to format issues.
 
 **Server error:**
-```json
-{
-    "errors": {
-        "registerUserB64": ["The registerUserB64 field is required."]
-    }
-}
+```
+System.FormatException: The input is not a valid Base-64 string as it contains a non-base 64 character, more than two padding characters, or an illegal character among the padding characters.
+   at System.Convert.FromBase64CharPtr(Char* inputPtr, Int32 inputLength)
+   at System.Convert.FromBase64String(String s)
+   at DataIntegrityTool.Services.ServerCryptographyService.DecryptRSA(String requestEncryptedB64)
 ```
 
-**Status:** Requires clarification with API developers
+**Current status:** 
+- ✅ JSON escaping fixed (removed `\/` issue)
+- ✅ Proper URL encoding implemented (`+` → `%2B`, `/` → `%2F`, `=` → `%3D`)
+- ❌ Server still cannot decode Base64 string
 
-### 2. Documentation vs Implementation
-**Problem:** Documentation describes `EncryptionWrapperDIT` structure, but server expects different format.
+**Possible causes:**
+1. Server expects different Base64 format
+2. RSA encryption creates incompatible Base64
+3. Server-side processing issue
 
-**Solution:** Clarify correct format with API developers
+**Status:** Requires investigation with API developers
+
+### 2. API Format Mismatch (Resolved)
+**Problem:** Server expected `registerUserB64` field, but code sent `EncryptionWrapperDIT` structure.
+
+**Status:** ✅ Resolved - Now using correct `registerCustomerB64` query parameter
+
+### 3. Documentation vs Implementation (Resolved)
+**Problem:** Documentation described `EncryptionWrapperDIT` structure, but server expected different format.
+
+**Status:** ✅ Resolved - Now using direct RSA encryption without wrapper
 
 ## Configuration
 

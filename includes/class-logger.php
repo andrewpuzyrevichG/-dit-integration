@@ -49,10 +49,10 @@ class Logger
      */
     public function log_api_interaction($action, $data = [], $status = 'info', $message = '')
     {
-        $settings = get_option('dit_settings');
-        if (empty($settings['debug_mode'])) {
-            return;
-        }
+        // $settings = get_option('dit_settings');
+        // if (empty($settings['debug_mode'])) {
+        //     return;
+        // }
 
         $timestamp = current_time('Y-m-d H:i:s');
         $log_entry = sprintf(
@@ -64,7 +64,7 @@ class Logger
         );
 
         if (!empty($data)) {
-            $log_entry .= "Data: " . json_encode($data, JSON_PRETTY_PRINT) . "\n";
+            $log_entry .= "Data: " . json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
         }
 
         $log_entry .= "----------------------------------------\n";
@@ -88,10 +88,10 @@ class Logger
      */
     public function log_form_submission($form_id, $user_data = [], $status = 'info', $message = '')
     {
-        $settings = get_option('dit_settings');
-        if (empty($settings['debug_mode'])) {
-            return;
-        }
+        // $settings = get_option('dit_settings');
+        // if (empty($settings['debug_mode'])) {
+        //     return;
+        // }
 
         $timestamp = current_time('Y-m-d H:i:s');
         $log_entry = sprintf(
@@ -112,7 +112,7 @@ class Logger
                 $masked_data['password_hash'] = '***MASKED***';
             }
 
-            $log_entry .= "User Data: " . json_encode($masked_data, JSON_PRETTY_PRINT) . "\n";
+            $log_entry .= "User Data: " . json_encode($masked_data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
         }
 
         $log_entry .= "----------------------------------------\n";

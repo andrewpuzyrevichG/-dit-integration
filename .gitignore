@@ -1,0 +1,15 @@
+.DS_Store
+*.tmp
+*.log
+~$*
+*.lock
+.vscode/
+.idea/
+/vendor/
+*.zip
+*.rar
+*.7z
+*.bak
+.env
+*.pem
+*.key

@@ -1,0 +1,102 @@
+/* Admin styles for DIT Integration */
+
+.dit-settings-wrap {
+    margin: 20px 0;
+}
+
+.dit-settings-wrap .form-table th {
+    width: 200px;
+}
+
+.dit-settings-wrap .form-table td {
+    padding: 15px 10px;
+}
+
+.dit-settings-wrap .form-table input[type="text"],
+.dit-settings-wrap .form-table input[type="number"],
+.dit-settings-wrap .form-table select {
+    width: 25em;
+    max-width: 100%;
+}
+
+.dit-settings-wrap .form-table .description {
+    margin-top: 5px;
+    color: #666;
+}
+
+.dit-metered-fields,
+.dit-subscription-fields {
+    display: none;
+}
+
+.dit-notice {
+    margin: 15px 0;
+}
+
+.dit-tooltip {
+    cursor: help;
+    border-bottom: 1px dotted #666;
+}
+
+/* Spinner styles */
+.spinner {
+    float: none;
+    margin: 4px 10px 0;
+    visibility: hidden;
+}
+
+.spinner.is-active {
+    visibility: visible;
+}
+
+/* Form field styles */
+.dit-form-field {
+    margin-bottom: 15px;
+}
+
+.dit-form-field label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 600;
+}
+
+.dit-form-field input[type="checkbox"] {
+    margin-right: 5px;
+}
+
+/* Button styles */
+.dit-button {
+    margin-right: 10px;
+}
+
+.dit-button:last-child {
+    margin-right: 0;
+}
+
+/* Tooltipster custom styles */
+.tooltipster-light {
+    border-radius: 3px;
+    border: 1px solid #ccc;
+    background: #fff;
+    box-shadow: 0 0 8px rgba(0,0,0,0.1);
+}
+
+.tooltipster-light .tooltipster-content {
+    font-size: 13px;
+    line-height: 1.4;
+    padding: 8px 10px;
+    color: #333;
+}
+
+/* Responsive styles */
+@media screen and (max-width: 782px) {
+    .dit-settings-wrap .form-table th {
+        width: auto;
+    }
+
+    .dit-settings-wrap .form-table input[type="text"],
+    .dit-settings-wrap .form-table input[type="number"],
+    .dit-settings-wrap .form-table select {
+        width: 100%;
+    }
+} 

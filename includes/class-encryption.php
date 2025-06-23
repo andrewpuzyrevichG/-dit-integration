@@ -29,6 +29,16 @@ class Encryption
         $this->active_key = $aes_key;
     }
 
+    public function clear_temporary_aes_key(): void
+    {
+        $this->active_key = null;
+    }
+
+    public function set_user_permanent_aes_key(string $permanent_aes_key): void
+    {
+        $this->active_key = $permanent_aes_key;
+    }
+
     public function init()
     {
         if (!extension_loaded('openssl')) {
@@ -62,15 +72,29 @@ class Encryption
         }
     }
 
-    public function encrypt_with_aes(string $data, string $aes_key, string $iv): string
+    public function generate_iv(): string
+    {
+        try {
+            // Generate a random 128-bit (16-byte) initialization vector
+            $iv = random_bytes(16);
+            return base64_encode($iv);
+        } catch (Exception $e) {
+            $this->display_error('Failed to generate IV: ' . $e->getMessage());
+            throw $e;
+        }
+    }
+
+    public function encrypt_with_aes(string $data, string $aes_key, string $base64_iv): string
     {
         try {
             if (strlen($aes_key) !== 32) {
                 throw new Exception('Invalid AES key length: must be 32 bytes');
             }
 
-            if (strlen($iv) !== 16) {
-                throw new Exception('Invalid IV length: must be 16 bytes');
+            // Decode base64 IV to get binary data
+            $iv = base64_decode($base64_iv);
+            if ($iv === false || strlen($iv) !== 16) {
+                throw new Exception('Invalid IV format or length');
             }
 
             $encrypted = openssl_encrypt(
@@ -133,40 +157,17 @@ class Encryption
         try {
             // AES key must be raw binary 32 bytes
             if (strlen($aes_key) !== 32) {
-                error_log('AES key length is NOT 32 bytes. Length: ' . strlen($aes_key));
-                error_log('AES key HEX: ' . bin2hex($aes_key));
                 throw new Exception('Invalid AES key length: must be 32 bytes of raw binary');
-            }
-
-            // Log the raw base64 key
-            error_log("RSA key raw base64: " . $rsa_public_key_base64);
-
-            // Try to decode and analyze the key
-            $key_bin = base64_decode($rsa_public_key_base64, true);
-            if ($key_bin !== false) {
-                error_log('RSA key decoded length: ' . strlen($key_bin) . ' bytes (' . (strlen($key_bin) * 8) . ' bits)');
-                error_log('RSA key HEX: ' . bin2hex(substr($key_bin, 0, 32)) . '...');
             }
 
             // Construct PEM format
             $public_key_pem = $this->convert_to_pem_format($rsa_public_key_base64);
 
-            // Log PEM key
-            error_log("PEM KEY:\n" . $public_key_pem);
-
             // Import public key
             $public_key_resource = openssl_pkey_get_public($public_key_pem);
             if ($public_key_resource === false) {
                 $err = openssl_error_string();
-                error_log("OpenSSL ERROR (importing): " . $err);
-
-                // Try alternative approach
-                error_log("Trying alternative key import method...");
-                $public_key_resource = $this->try_alternative_key_import($rsa_public_key_base64);
-
-                if ($public_key_resource === false) {
-                    throw new Exception('Failed to import RSA public key: ' . $err);
-                }
+                throw new Exception('Failed to import RSA public key: ' . $err);
             }
 
             // Check key type
@@ -174,8 +175,6 @@ class Encryption
             if ($key_details === false || $key_details['type'] !== OPENSSL_KEYTYPE_RSA) {
                 throw new Exception('Invalid key type: must be RSA');
             }
-
-            error_log("RSA key imported successfully. Bit length: " . $key_details['bits']);
 
             // Encrypt AES key with RSA
             $encrypted = '';
@@ -188,16 +187,58 @@ class Encryption
 
             if ($result === false) {
                 $err = openssl_error_string();
-                error_log("OpenSSL ERROR (encryption): " . $err);
                 throw new Exception('RSA encryption failed: ' . $err);
             }
-
-            // Free resource
-            openssl_free_key($public_key_resource);
 
             return base64_encode($encrypted);
         } catch (Exception $e) {
             $this->display_error('RSA encryption error: ' . $e->getMessage());
+            throw $e;
+        }
+    }
+
+    public function encrypt_data_with_rsa(string $data, string $rsa_public_key_base64): string
+    {
+        try {
+            // Construct PEM format from the base64 public key
+            $public_key_pem = $this->convert_to_pem_format($rsa_public_key_base64);
+
+            // Import public key
+            $public_key_resource = openssl_pkey_get_public($public_key_pem);
+            if ($public_key_resource === false) {
+                $err = openssl_error_string();
+                error_log("OpenSSL ERROR (importing public key): " . $err);
+                throw new Exception('Failed to import RSA public key: ' . $err);
+            }
+
+            // Check key type to ensure it is an RSA key
+            $key_details = openssl_pkey_get_details($public_key_resource);
+            if ($key_details === false || $key_details['type'] !== OPENSSL_KEYTYPE_RSA) {
+                throw new Exception('Invalid key type provided: must be an RSA public key.');
+            }
+
+            // Encrypt the data with the RSA public key
+            $encrypted = '';
+            $result = openssl_public_encrypt(
+                $data,
+                $encrypted,
+                $public_key_resource,
+                OPENSSL_PKCS1_PADDING
+            );
+
+            if ($result === false) {
+                $err = openssl_error_string();
+                error_log("OpenSSL ERROR (encryption): " . $err);
+                throw new Exception('RSA encryption failed: ' . $err);
+            }
+
+            // In PHP 8.0+, the key resource is automatically freed.
+            // openssl_free_key($public_key_resource);
+
+            // Return the encrypted data, encoded in Base64
+            return base64_encode($encrypted);
+        } catch (Exception $e) {
+            $this->display_error('RSA data encryption error: ' . $e->getMessage());
             throw $e;
         }
     }
@@ -214,8 +255,6 @@ class Encryption
         // Test if PKCS#1 works
         $test_key = openssl_pkey_get_public($pkcs1_pem);
         if ($test_key !== false) {
-            error_log("Converted to PKCS#1 PEM format (RSA-specific)");
-            // Remove deprecated function call - key will be freed automatically
             return $pkcs1_pem;
         }
 
@@ -225,20 +264,16 @@ class Encryption
         // Test if PKCS#8 works
         $test_key = openssl_pkey_get_public($pkcs8_pem);
         if ($test_key !== false) {
-            error_log("Converted to PKCS#8 PEM format (generic)");
-            // Remove deprecated function call - key will be freed automatically
             return $pkcs8_pem;
         }
 
         // If both fail, try using OpenSSL CLI conversion
-        error_log("Both PEM formats failed, trying OpenSSL CLI conversion");
         $converted_pem = $this->convert_via_openssl_cli($rsa_public_key_base64);
         if ($converted_pem !== false) {
             return $converted_pem;
         }
 
         // Last resort - return PKCS#1 format and let the caller handle errors
-        error_log("All conversion methods failed, returning PKCS#1 format as fallback");
         return $pkcs1_pem;
     }
 
@@ -248,7 +283,6 @@ class Encryption
             // Decode base64 to get DER
             $key_bin = base64_decode($rsa_public_key_base64, true);
             if ($key_bin === false) {
-                error_log("Failed to decode base64 key for CLI conversion");
                 return false;
             }
 
@@ -268,19 +302,20 @@ class Encryption
                 unlink($pem_file);
 
                 if ($pem_content && strpos($pem_content, 'BEGIN PUBLIC KEY') !== false) {
-                    error_log("Successfully converted key using OpenSSL CLI");
                     return $pem_content;
                 }
             }
 
-            // Cleanup
-            if (file_exists($temp_file)) unlink($temp_file);
-            if (file_exists($pem_file)) unlink($pem_file);
+            // Cleanup if conversion failed
+            if (file_exists($temp_file)) {
+                unlink($temp_file);
+            }
+            if (file_exists($pem_file)) {
+                unlink($pem_file);
+            }
 
-            error_log("OpenSSL CLI conversion failed: " . $output);
             return false;
         } catch (Exception $e) {
-            error_log("Exception during OpenSSL CLI conversion: " . $e->getMessage());
             return false;
         }
     }
@@ -409,96 +444,47 @@ class Encryption
     {
         try {
             $test_key = $this->generate_test_rsa_key();
-            $test_data = "Hello World";
-
-            $encrypted = $this->encrypt_with_rsa($test_data, $test_key);
-            error_log("RSA encryption test passed");
+            $aes_key = random_bytes(32);
+            $this->encrypt_with_rsa($aes_key, $test_key);
             return true;
         } catch (Exception $e) {
-            error_log("RSA encryption test failed: " . $e->getMessage());
+            $this->display_error('RSA encryption self-test failed: ' . $e->getMessage());
             return false;
         }
     }
 
-    /**
-     * Encrypt request payload according to documentation:
-     * - AES-256-CBC for JSON
-     * - AES key encrypted with RSA
-     * - Returns array with keys: data, key, iv
-     */
     public function encrypt_request_payload(array $payload, string $rsa_key_base64): array
     {
         try {
-            // Log input parameters
-            error_log("encrypt_request_payload called with payload keys: " . implode(', ', array_keys($payload)));
-            error_log("RSA key length: " . strlen($rsa_key_base64));
+            // Step 1: Generate a one-time AES key and IV
+            $aes_key = random_bytes(32); // 256-bit key
+            $iv_base64 = $this->generate_iv(); // 128-bit IV for CBC mode, base64 encoded
 
-            // 1. Generate AES key and IV
-            $aes_key_raw = random_bytes(32);
-            $iv_raw = random_bytes(16);
-            error_log("Generated AES key length: " . strlen($aes_key_raw) . " bytes");
-            error_log("Generated IV length: " . strlen($iv_raw) . " bytes");
-
-            // 2. Encode payload as JSON
+            // Step 2: Serialize the payload to JSON
             $json_payload = json_encode($payload);
             if ($json_payload === false) {
-                throw new Exception('Failed to encode payload to JSON: ' . json_last_error_msg());
+                throw new Exception('Failed to serialize payload to JSON: ' . json_last_error_msg());
             }
-            error_log("JSON payload length: " . strlen($json_payload) . " bytes");
-            error_log("JSON payload preview: " . substr($json_payload, 0, 200) . "...");
 
-            // 3. Encrypt JSON with AES-256-CBC
-            $encrypted_data = openssl_encrypt(
-                $json_payload,
-                'AES-256-CBC',
-                $aes_key_raw,
-                OPENSSL_RAW_DATA,
-                $iv_raw
-            );
-            if ($encrypted_data === false) {
-                throw new Exception('AES encryption failed: ' . openssl_error_string());
-            }
-            error_log("AES encrypted data length: " . strlen($encrypted_data) . " bytes");
+            // Step 3: Encrypt the JSON payload with the one-time AES key
+            $encrypted_data_base64 = $this->encrypt_with_aes($json_payload, $aes_key, $iv_base64);
 
-            // 4. Encrypt AES key with RSA
-            $public_key_pem = $this->convert_to_pem_format($rsa_key_base64);
-            error_log("PEM key length: " . strlen($public_key_pem) . " bytes");
+            // Step 4: Encrypt the one-time AES key with the server's public RSA key
+            $encrypted_aes_key_base64 = $this->encrypt_with_rsa($aes_key, $rsa_key_base64);
 
-            $public_key_resource = openssl_pkey_get_public($public_key_pem);
-            if ($public_key_resource === false) {
-                throw new Exception('Failed to import RSA public key: ' . openssl_error_string());
-            }
-            error_log("RSA public key imported successfully");
-
-            $encrypted_key = '';
-            $result = openssl_public_encrypt(
-                $aes_key_raw,
-                $encrypted_key,
-                $public_key_resource,
-                OPENSSL_PKCS1_PADDING
-            );
-            // Note: openssl_free_key() is deprecated in PHP 8.0+ and will be freed automatically
-            // openssl_free_key($public_key_resource);
-            if ($result === false) {
-                throw new Exception('RSA encryption failed: ' . openssl_error_string());
-            }
-            error_log("RSA encrypted key length: " . strlen($encrypted_key) . " bytes");
-
-            // 5. Return result as per documentation
-            $result_array = [
-                'data' => base64_encode($encrypted_data),
-                'key'  => base64_encode($encrypted_key),
-                'iv'   => base64_encode($iv_raw)
+            // Step 5: Assemble the final encrypted object
+            $encrypted_object = [
+                'data' => $encrypted_data_base64,
+                'key'  => $encrypted_aes_key_base64,
+                'iv'   => $iv_base64,
             ];
 
-            error_log("Encryption result keys: " . implode(', ', array_keys($result_array)));
-            error_log("Base64 data length: " . strlen($result_array['data']) . " bytes");
-            error_log("Base64 key length: " . strlen($result_array['key']) . " bytes");
-            error_log("Base64 iv length: " . strlen($result_array['iv']) . " bytes");
+            // For debugging: log the structure of the created object
+            error_log('DIT Integration: Created hybrid encryption payload with keys: ' . implode(', ', array_keys($encrypted_object)));
 
-            return $result_array;
+            return $encrypted_object;
         } catch (Exception $e) {
-            $this->display_error('Encryption error: ' . $e->getMessage());
+            $this->display_error('Failed to encrypt request payload: ' . $e->getMessage());
             throw $e;
         }
     }

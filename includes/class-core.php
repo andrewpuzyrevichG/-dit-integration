@@ -141,10 +141,14 @@ class Core
                 error_log('DIT Integration: API initialized successfully');
             } else {
                 error_log('DIT Integration: API class still not found after manual load');
+                // Don't throw exception, just log the error and continue
+                $this->api = null;
             }
         } catch (Exception $e) {
             error_log('DIT Integration: Failed to initialize API - ' . $e->getMessage());
             error_log('DIT Integration: API exception trace: ' . $e->getTraceAsString());
+            // Don't throw exception, just log the error and continue
+            $this->api = null;
         }
 
         // Initialize encryption - ensure class is loaded
@@ -166,10 +170,14 @@ class Core
                 error_log('DIT Integration: Encryption initialized successfully');
             } else {
                 error_log('DIT Integration: Encryption class still not found after manual load');
+                // Don't throw exception, just log the error and continue
+                $this->encryption = null;
             }
         } catch (Exception $e) {
             error_log('DIT Integration: Failed to initialize Encryption - ' . $e->getMessage());
             error_log('DIT Integration: Encryption exception trace: ' . $e->getTraceAsString());
+            // Don't throw exception, just log the error and continue
+            $this->encryption = null;
         }
 
         // Initialize WPForms integration

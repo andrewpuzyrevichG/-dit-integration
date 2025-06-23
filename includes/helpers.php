@@ -152,3 +152,77 @@ function is_dit_api_configured()
     $settings = get_settings();
     return !empty($settings['dit_api_url']) && !empty($settings['dit_api_key']);
 }
+
+/**
+ * Save user registration data.
+ *
+ * @param string $user_name User name.
+ * @param int $customer_id Customer ID from DIT API.
+ * @param string $permanent_aes_key Permanent AES key for future use.
+ * @return bool True if data was saved successfully.
+ */
+function save_user_data($user_name, $customer_id, $permanent_aes_key)
+{
+    try {
+        $settings = get_settings();
+
+        // Add user data to settings
+        $settings['registered_users'][$customer_id] = [
+            'name' => sanitize_text_field($user_name),
+            'customer_id' => (int) $customer_id,
+            'permanent_aes_key' => sanitize_text_field($permanent_aes_key),
+            'registration_date' => current_time('mysql'),
+            'last_updated' => current_time('mysql')
+        ];
+
+        // Save updated settings
+        $result = update_option('dit_settings', $settings);
+
+        if ($result) {
+            log_message("User data saved successfully for customer ID: {$customer_id}", 'info');
+            return true;
+        } else {
+            log_message("Failed to save user data for customer ID: {$customer_id}", 'error');
+            return false;
+        }
+    } catch (\Exception $e) {
+        log_message("Error saving user data: " . $e->getMessage(), 'error');
+        return false;
+    }
+}
+
+/**
+ * Get user data by customer ID.
+ *
+ * @param int $customer_id Customer ID.
+ * @return array|null User data or null if not found.
+ */
+function get_user_data($customer_id)
+{
+    $settings = get_settings();
+    return $settings['registered_users'][$customer_id] ?? null;
+}
+
+/**
+ * Get permanent AES key for a user.
+ *
+ * @param int $customer_id Customer ID.
+ * @return string|null Permanent AES key or null if not found.
+ */
+function get_user_permanent_aes_key($customer_id)
+{
+    $user_data = get_user_data($customer_id);
+    return $user_data['permanent_aes_key'] ?? null;
+}
+
+/**
+ * Get user name by customer ID.
+ *
+ * @param int $customer_id Customer ID.
+ * @return string|null User name or null if not found.
+ */
+function get_user_name($customer_id)
+{
+    $user_data = get_user_data($customer_id);
+    return $user_data['name'] ?? null;
+}

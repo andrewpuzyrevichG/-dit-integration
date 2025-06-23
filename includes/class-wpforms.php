@@ -127,52 +127,26 @@ class WPForms
 
     private function process_form_submission($submitted_data, $form_data)
     {
-        // Get API and Encryption instances
-        $api = new API();
-        $encryption = new Encryption();
         $core = Core::get_instance();
         $logger = $core->logger;
+        $api = $core->api;
+        $encryption = $core->encryption;
 
         try {
-            // Log start of processing
-            $logger->log_form_submission(
-                $form_data['id'],
-                ['submitted_data' => $submitted_data],
-                'info',
-                'Starting form submission processing'
-            );
-
-            // Check if this was a payment form
-            $settings = get_option('dit_settings');
-            $debug_mode = $settings['debug_mode'] ?? false;
-            $has_payment = !empty($form_data['settings']['payment_enabled']);
-
-            if ($has_payment && $debug_mode) {
+            // Check if encryption is available
+            if ($encryption === null) {
                 $logger->log_form_submission(
                     $form_data['id'],
                     [],
-                    'info',
-                    'Processing form with simulated payment (debug mode)'
+                    'error',
+                    'Encryption instance is null - cannot generate AES key'
                 );
-            } elseif ($has_payment) {
-                $logger->log_form_submission(
-                    $form_data['id'],
-                    [],
-                    'info',
-                    'Processing form with real payment processing'
-                );
-            } else {
-                $logger->log_form_submission(
-                    $form_data['id'],
-                    [],
-                    'info',
-                    'Processing form without payment'
-                );
+                error_log('DIT Integration: Encryption instance is null - cannot generate AES key');
+                return false;
             }
 
-            // Extract user data from form fields
+            // Extract user data from form submission
             $user_data = $this->extract_user_data($submitted_data, $form_data);
-
             if (empty($user_data)) {
                 $logger->log_form_submission(
                     $form_data['id'],
@@ -184,19 +158,34 @@ class WPForms
                 return false;
             }
 
-            // Log extracted user data (without sensitive information)
+            // Додаємо генерацію AES-ключа для нового користувача
+            $user_data['aes_key'] = $encryption->generate_aes_key();
+
+            // Log essential user data (without sensitive information)
             $logger->log_form_submission(
                 $form_data['id'],
                 [
                     'email' => $user_data['email'],
                     'has_password' => !empty($user_data['password']),
-                    'has_name' => !empty($user_data['first_name']) || !empty($user_data['last_name'])
+                    'has_name' => !empty($user_data['first_name']) || !empty($user_data['last_name']),
+                    'aes_key_generated' => !empty($user_data['aes_key'])
                 ],
                 'info',
                 'User data extracted successfully'
             );
 
             // Register customer with DIT API
+            if ($api === null) {
+                $logger->log_form_submission(
+                    $form_data['id'],
+                    [],
+                    'error',
+                    'API instance is null - cannot register customer'
+                );
+                error_log('DIT Integration: API instance is null - cannot register customer');
+                return false;
+            }
+
             $customer_id = $api->register_customer($user_data);
 
             if ($customer_id === null) {
@@ -244,65 +233,15 @@ class WPForms
         $core = Core::get_instance();
         $logger = $core->logger;
 
-        // Log the submitted data for debugging
-        $logger->log_form_submission(
-            $form_data['id'],
-            [
-                'submitted_fields_count' => count($submitted_data),
-                'submitted_field_types' => array_column($submitted_data, 'type'),
-                'submitted_field_ids' => array_keys($submitted_data)
-            ],
-            'info',
-            'Starting user data extraction'
-        );
-
         // Look for common field types
         foreach ($submitted_data as $field_id => $field) {
             $field_type = $field['type'];
             $field_value = $field['value'];
 
-            $logger->log_form_submission(
-                $form_data['id'],
-                [
-                    'field_id' => $field_id,
-                    'field_type' => $field_type,
-                    'field_value_length' => strlen($field_value),
-                    'field_value_preview' => substr($field_value, 0, 50),
-                    'is_empty' => $field['is_empty'] ?? false
-                ],
-                'info',
-                'Processing field'
-            );
-
             // For name fields, we want to capture them even if empty initially
             // as we'll provide fallback values later
             if (empty($field_value) && $field_type !== 'name' && $field_type !== 'text') {
-                $logger->log_form_submission(
-                    $form_data['id'],
-                    [
-                        'field_id' => $field_id,
-                        'field_type' => $field_type
-                    ],
-                    'info',
-                    'Skipping empty field (non-name)'
-                );
                 continue;
-            }
-
-            // Log when we process name/text fields (even if empty)
-            if ($field_type === 'name' || $field_type === 'text') {
-                $logger->log_form_submission(
-                    $form_data['id'],
-                    [
-                        'field_id' => $field_id,
-                        'field_type' => $field_type,
-                        'field_value' => $field_value,
-                        'field_value_length' => strlen($field_value),
-                        'is_empty' => empty($field_value)
-                    ],
-                    'info',
-                    'Processing name/text field'
-                );
             }
 
             switch ($field_type) {
@@ -314,32 +253,8 @@ class WPForms
                     // For name fields, always capture the value (even if empty)
                     if (empty($user_data['first_name'])) {
                         $user_data['first_name'] = sanitize_text_field($field_value);
-                        $logger->log_form_submission(
-                            $form_data['id'],
-                            [
-                                'field_id' => $field_id,
-                                'field_type' => $field_type,
-                                'assigned_to' => 'first_name',
-                                'value' => $field_value,
-                                'sanitized_value' => sanitize_text_field($field_value)
-                            ],
-                            'info',
-                            'Assigned field to first_name'
-                        );
                     } else {
                         $user_data['last_name'] = sanitize_text_field($field_value);
-                        $logger->log_form_submission(
-                            $form_data['id'],
-                            [
-                                'field_id' => $field_id,
-                                'field_type' => $field_type,
-                                'assigned_to' => 'last_name',
-                                'value' => $field_value,
-                                'sanitized_value' => sanitize_text_field($field_value)
-                            ],
-                            'info',
-                            'Assigned field to last_name'
-                        );
                     }
                     break;
                 case 'password':
@@ -366,66 +281,22 @@ class WPForms
 
         if (!empty($name_parts)) {
             $user_data['name'] = implode(' ', $name_parts);
-            $logger->log_form_submission(
-                $form_data['id'],
-                [
-                    'name_source' => 'combined_first_last',
-                    'name_parts' => $name_parts,
-                    'final_name' => $user_data['name']
-                ],
-                'info',
-                'Name created from first/last name parts'
-            );
-        } else {
-            // If no name fields found, use email as fallback
-            $user_data['name'] = !empty($user_data['email']) ? $user_data['email'] : 'Unknown User';
-
-            // Log final user data for debugging
-            $logger->log_form_submission(
-                $form_data['id'],
-                [
-                    'final_user_data_keys' => array_keys($user_data),
-                    'final_name_value' => $user_data['name'] ?? 'NOT_SET',
-                    'final_name_length' => strlen($user_data['name'] ?? ''),
-                    'final_name_empty' => empty($user_data['name']),
-                    'final_email_value' => $user_data['email'] ?? 'NOT_SET',
-                    'final_password_set' => isset($user_data['password']),
-                    'final_tools_set' => isset($user_data['tools']),
-                    'user_data_complete' => !empty($user_data['name']) && !empty($user_data['email']) && isset($user_data['password'])
-                ],
-                'info',
-                'Final user data extracted'
-            );
         }
 
-        // Log the extracted user data
+        // Log essential form data (without sensitive information)
         $logger->log_form_submission(
             $form_data['id'],
             [
-                'extracted_email' => $user_data['email'] ?? 'NOT_FOUND',
-                'extracted_name' => $user_data['name'] ?? 'NOT_FOUND',
-                'extracted_first_name' => $user_data['first_name'] ?? 'NOT_FOUND',
-                'extracted_last_name' => $user_data['last_name'] ?? 'NOT_FOUND',
+                'submitted_fields_count' => count($submitted_data),
+                'has_email' => !empty($user_data['email']),
+                'has_name' => !empty($user_data['name']),
                 'has_password' => !empty($user_data['password']),
-                'name_parts_count' => count($name_parts)
+                'has_phone' => !empty($user_data['phone']),
+                'has_address' => !empty($user_data['address'])
             ],
             'info',
-            'User data extraction completed'
+            'Form data extracted successfully'
         );
-
-        // Check if we have required fields
-        if (empty($user_data['email']) || empty($user_data['password_hash'])) {
-            $logger->log_form_submission(
-                $form_data['id'],
-                [
-                    'missing_email' => empty($user_data['email']),
-                    'missing_password' => empty($user_data['password_hash'])
-                ],
-                'error',
-                'Required fields missing'
-            );
-            return false;
-        }
 
         return $user_data;
     }

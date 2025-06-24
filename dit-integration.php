@@ -137,6 +137,43 @@ foreach ($class_files as $file) {
     }
 }
 
+// Manually load critical classes to ensure they are available
+try {
+    if (!class_exists('DIT\\API')) {
+        $api_file = DIT_PLUGIN_DIR . 'includes/class-api.php';
+        if (file_exists($api_file)) {
+            require_once $api_file;
+            error_log('DIT Integration: API class loaded manually');
+        } else {
+            error_log('DIT Integration: ERROR - API file not found for manual load: ' . $api_file);
+        }
+    }
+
+    if (!class_exists('DIT\\Encryption')) {
+        $encryption_file = DIT_PLUGIN_DIR . 'includes/class-encryption.php';
+        if (file_exists($encryption_file)) {
+            require_once $encryption_file;
+            error_log('DIT Integration: Encryption class loaded manually');
+        } else {
+            error_log('DIT Integration: ERROR - Encryption file not found for manual load: ' . $encryption_file);
+        }
+    }
+
+    if (!class_exists('DIT\\WPForms')) {
+        $wpforms_file = DIT_PLUGIN_DIR . 'includes/class-wpforms.php';
+        if (file_exists($wpforms_file)) {
+            require_once $wpforms_file;
+            error_log('DIT Integration: WPForms class loaded manually');
+        } else {
+            error_log('DIT Integration: ERROR - WPForms file not found for manual load: ' . $wpforms_file);
+        }
+    }
+} catch (Exception $e) {
+    error_log('DIT Integration: Exception during manual class loading: ' . $e->getMessage());
+} catch (Error $e) {
+    error_log('DIT Integration: Error during manual class loading: ' . $e->getMessage());
+}
+
 // Verify assets directory exists
 $assets_dir = DIT_PLUGIN_DIR . 'assets';
 $js_dir = $assets_dir . '/js';

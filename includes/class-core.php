@@ -82,8 +82,7 @@ class Core
      */
     private function __construct()
     {
-        // Initialize components when WordPress is ready
-        add_action('init', [$this, 'init'], 0);
+        // Plugin will be initialized in run() method
     }
 
     /**
@@ -236,6 +235,9 @@ class Core
     {
         // Load text domain
         add_action('plugins_loaded', [$this, 'load_textdomain']);
+
+        // Initialize the plugin
+        $this->init();
     }
 
     /**

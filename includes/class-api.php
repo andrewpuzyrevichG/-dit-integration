@@ -162,6 +162,29 @@ class API
                 if (!$rsa_key) {
                     throw new Exception('Failed to get server RSA public key for registration.');
                 }
+
+                // Validate RSA key format
+                if (!preg_match('/^[A-Za-z0-9\/+\=]+$/', $rsa_key)) {
+                    throw new Exception('Invalid RSA key format received from server');
+                }
+
+                // Check RSA key length
+                if (strlen($rsa_key) % 4 !== 0) {
+                    throw new Exception('Invalid RSA key length: ' . strlen($rsa_key) . ' (must be multiple of 4)');
+                }
+
+                // Log RSA key details
+                $logger->log_api_interaction('Register Customer', [
+                    'rsa_key_received' => !empty($rsa_key),
+                    'rsa_key_length' => strlen($rsa_key),
+                    'rsa_key_valid_format' => preg_match('/^[A-Za-z0-9\/+\=]+$/', $rsa_key) ? 'yes' : 'no',
+                    'rsa_key_valid_length' => (strlen($rsa_key) % 4 === 0) ? 'yes' : 'no',
+                    'rsa_key_contains_plus' => strpos($rsa_key, '+') !== false ? 'yes' : 'no',
+                    'rsa_key_contains_slash' => strpos($rsa_key, '/') !== false ? 'yes' : 'no',
+                    'rsa_key_contains_equals' => strpos($rsa_key, '=') !== false ? 'yes' : 'no',
+                    'rsa_key_first_10_chars' => substr($rsa_key, 0, 10),
+                    'rsa_key_last_10_chars' => substr($rsa_key, -10)
+                ], 'info', 'RSA public key info used for encryption.');
             }
 
             // Step 2: Prepare the raw data payload for encryption (optimized for RSA size limits)
@@ -201,16 +224,47 @@ class API
             if (empty($encrypted_payload)) {
                 throw new Exception('Failed to encrypt the registration JSON payload with RSA.');
             }
-            // For RegisterCustomer, send only the RSA-encrypted data (no wrapper)
-            $register_user_b64 = $encrypted_payload;
 
             // Log encryption process
             $logger->log_api_interaction('Register Customer', [
-                'json_payload_length' => mb_strlen($json_payload, '8bit'),
-                'encrypted_payload_length' => mb_strlen($encrypted_payload, '8bit'),
+                'json_payload_length' => strlen($json_payload),
+                'encrypted_payload_length' => strlen($encrypted_payload),
                 'no_wrapper' => true,
-                'encryption_method' => 'rsa'
+                'encryption_method' => 'rsa',
+                'rsa_encryption_success' => !empty($encrypted_payload),
+                'encrypted_data_valid_base64' => preg_match('/^[A-Za-z0-9\/+\=]+$/', $encrypted_payload) ? 'yes' : 'no',
+                'encrypted_data_length_valid' => (strlen($encrypted_payload) % 4 === 0) ? 'yes' : 'no',
+                'encrypted_data_contains_plus' => strpos($encrypted_payload, '+') !== false ? 'yes' : 'no',
+                'encrypted_data_contains_slash' => strpos($encrypted_payload, '/') !== false ? 'yes' : 'no',
+                'encrypted_data_contains_equals' => strpos($encrypted_payload, '=') !== false ? 'yes' : 'no',
+                'encrypted_data_first_20_chars' => substr($encrypted_payload, 0, 20),
+                'encrypted_data_last_20_chars' => substr($encrypted_payload, -20),
+                'encrypted_data_is_binary' => !mb_check_encoding($encrypted_payload, 'UTF-8') ? 'yes' : 'no'
             ], 'info', 'Encryption process completed with rsa method (no wrapper).');
+
+            // For RegisterCustomer, send only the RSA-encrypted data (no wrapper)
+            $register_user_b64 = $encrypted_payload;
+
+            // Validate Base64 format immediately after encryption
+            if (!preg_match('/^[A-Za-z0-9\/+\=]+$/', $register_user_b64)) {
+                $invalid_chars = preg_replace('/[A-Za-z0-9\/+\=]/', '', $register_user_b64);
+                throw new Exception('Invalid Base64 format detected in encrypted payload. Invalid characters: ' . bin2hex($invalid_chars));
+            }
+
+            // Check if Base64 length is valid (must be multiple of 4)
+            if (strlen($register_user_b64) % 4 !== 0) {
+                throw new Exception('Invalid Base64 length: ' . strlen($register_user_b64) . ' (must be multiple of 4)');
+            }
+
+            // Test Base64 decode/encode to ensure it's valid
+            $decoded_test = base64_decode($register_user_b64, true);
+            if ($decoded_test === false) {
+                throw new Exception('Base64 decode test failed - invalid Base64 string');
+            }
+            $reencoded_test = base64_encode($decoded_test);
+            if ($reencoded_test !== $register_user_b64) {
+                throw new Exception('Base64 re-encode test failed - string was modified');
+            }
 
             // Log the actual Base64 string and its length
             $logger->log_api_interaction('Register Customer', [
@@ -222,6 +276,14 @@ class API
                 'base64_contains_plus' => strpos($register_user_b64, '+') !== false ? 'yes' : 'no',
                 'base64_contains_slash' => strpos($register_user_b64, '/') !== false ? 'yes' : 'no',
                 'base64_contains_equals' => strpos($register_user_b64, '=') !== false ? 'yes' : 'no',
+                'base64_char_count_plus' => substr_count($register_user_b64, '+'),
+                'base64_char_count_slash' => substr_count($register_user_b64, '/'),
+                'base64_char_count_equals' => substr_count($register_user_b64, '='),
+                'base64_char_count_percent' => substr_count($register_user_b64, '%'),
+                'base64_char_count_space' => substr_count($register_user_b64, ' '),
+                'base64_char_count_newline' => substr_count($register_user_b64, "\n"),
+                'base64_char_count_cr' => substr_count($register_user_b64, "\r"),
+                'base64_char_count_tab' => substr_count($register_user_b64, "\t"),
             ], 'debug', 'Base64-encoded RSA payload before sending.', JSON_UNESCAPED_SLASHES);
 
             // Log the RSA public key fingerprint (SHA-256)
@@ -239,24 +301,35 @@ class API
             ], 'debug', 'RSA public key info used for encryption.');
 
             // Step 8: Send the registration request
-            // Use proper URL encoding for Base64 - encode only the necessary characters
-            $encoded_base64 = str_replace(['+', '/', '='], ['%2B', '%2F', '%3D'], $register_user_b64);
+            // Send Base64 data as query parameter with PUT method (per Swagger documentation)
+            $encoded_base64 = urlencode($register_user_b64);
             $request_url = $this->api_base_url . '/Customers/RegisterCustomer?registerCustomerB64=' . $encoded_base64;
 
+            // Log detailed information about the Base64 and URL encoding
             $logger->log_api_interaction('Register Customer', [
                 'request_url' => $request_url,
                 'method' => 'PUT',
                 'original_base64' => $register_user_b64,
-                'encoded_base64' => $encoded_base64,
-                'encoded_base64_length' => strlen($encoded_base64),
-                'encoded_contains_percent' => strpos($encoded_base64, '%') !== false ? 'yes' : 'no',
-                'url_length' => strlen($request_url)
-            ], 'info', 'Sending registration request with proper URL encoding.');
+                'base64_length' => strlen($register_user_b64),
+                'base64_contains_plus' => strpos($register_user_b64, '+') !== false ? 'yes' : 'no',
+                'base64_contains_slash' => strpos($register_user_b64, '/') !== false ? 'yes' : 'no',
+                'base64_contains_equals' => strpos($register_user_b64, '=') !== false ? 'yes' : 'no',
+                'base64_is_valid' => preg_match('/^[A-Za-z0-9\\/+\\=]+$/', $register_user_b64) ? 'yes' : 'no',
+                'base64_length_valid' => (strlen($register_user_b64) % 4 === 0) ? 'yes' : 'no',
+                'url_encoded_base64' => $encoded_base64,
+                'url_encoded_length' => strlen($encoded_base64),
+                'encoding_method' => 'url_query_put',
+                'full_request_url' => $request_url
+            ], 'info', 'Sending registration request with PUT method and query parameter.');
 
             $response = wp_remote_request($request_url, [
                 'method' => 'PUT',
                 'timeout' => 30,
-                'sslverify' => true
+                'sslverify' => true,
+                'headers' => [
+                    'Accept' => 'application/json'
+                ]
+                // No body!
             ]);
 
             if (is_wp_error($response)) {
@@ -269,7 +342,12 @@ class API
             $logger->log_api_interaction('Register Customer', [
                 'response_code' => $response_code,
                 'response_body' => $response_body,
-                'encryption_method' => $encryption_method
+                'encryption_method' => $encryption_method,
+                'response_headers' => wp_remote_retrieve_headers($response),
+                'response_error' => is_wp_error($response) ? $response->get_error_message() : null,
+                'request_url_sent' => $request_url,
+                'request_method_sent' => 'PUT',
+                'original_base64_sent' => $register_user_b64,
             ], $response_code === 200 ? 'success' : 'error', 'Registration response received.');
 
             if ($response_code !== 200) {

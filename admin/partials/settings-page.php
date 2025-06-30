@@ -22,21 +22,43 @@ $settings = get_option('dit_settings', []);
         <table class="form-table">
             <tr>
                 <th scope="row">
-                    <label for="dit_wpforms_form"><?php _e('WPForms Form', 'dit-integration'); ?></label>
+                    <label for="dit_signup_form"><?php _e('Sign Up Form', 'dit-integration'); ?></label>
                 </th>
                 <td>
-                    <select id="dit_wpforms_form" name="dit_settings[wpforms_form]" class="regular-text">
+                    <select id="dit_signup_form" name="dit_settings[signup_form]" class="regular-text">
                         <option value=""><?php _e('Select a form', 'dit-integration'); ?></option>
                         <?php if (!empty($forms)) : ?>
                             <?php foreach ($forms as $form) : ?>
                                 <option value="<?php echo esc_attr($form->ID); ?>"
-                                    <?php selected($settings['wpforms_form'] ?? '', $form->ID); ?>>
+                                    <?php selected($settings['signup_form'] ?? '', $form->ID); ?>>
                                     <?php echo esc_html($form->post_title); ?>
                                 </option>
                             <?php endforeach; ?>
                         <?php endif; ?>
                     </select>
-                    <p class="description"><?php _e('Select the WPForms form to integrate with.', 'dit-integration'); ?>
+                    <p class="description">
+                        <?php _e('Select the WPForms form for user registration.', 'dit-integration'); ?>
+                    </p>
+                </td>
+            </tr>
+
+            <tr>
+                <th scope="row">
+                    <label for="dit_signin_form"><?php _e('Sign In Form', 'dit-integration'); ?></label>
+                </th>
+                <td>
+                    <select id="dit_signin_form" name="dit_settings[signin_form]" class="regular-text">
+                        <option value=""><?php _e('Select a form', 'dit-integration'); ?></option>
+                        <?php if (!empty($forms)) : ?>
+                            <?php foreach ($forms as $form) : ?>
+                                <option value="<?php echo esc_attr($form->ID); ?>"
+                                    <?php selected($settings['signin_form'] ?? '', $form->ID); ?>>
+                                    <?php echo esc_html($form->post_title); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </select>
+                    <p class="description"><?php _e('Select the WPForms form for user login.', 'dit-integration'); ?>
                     </p>
                 </td>
             </tr>

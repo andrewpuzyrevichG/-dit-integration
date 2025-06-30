@@ -138,10 +138,23 @@ class API
     }
 
     /**
-     * Register a new customer with different encryption approaches
+     * Register a new customer (main method)
+     * Uses the new Prepare endpoint by default
      *
      * @param array $user_data User data to register
-     * @param string $encryption_method Encryption method to use ('rsa', 'aes', 'hybrid')
+     * @return int|null Customer ID or null on failure
+     */
+    public function register_customer(array $user_data): ?int
+    {
+        // Use the new Prepare endpoint by default
+        return $this->register_customer_prepare($user_data);
+    }
+
+    /**
+     * Register a new customer with RSA encryption
+     *
+     * @param array $user_data User data to register
+     * @param string $encryption_method Ignored, kept for compatibility
      * @return int|null Customer ID or null on failure
      */
     public function register_customer_with_method(array $user_data, string $encryption_method = 'rsa'): ?int
@@ -151,185 +164,74 @@ class API
         $encryption = $core->encryption;
 
         $logger->log_api_interaction('Register Customer', [
-            'encryption_method' => $encryption_method
-        ], 'info', 'Starting registration process with specified encryption method.');
+            'encryption_method' => 'rsa',
+            'user_data_keys' => array_keys($user_data)
+        ], 'info', 'Starting registration process with RSA encryption.');
 
         try {
-            // Step 1: Get RSA public key from the server (if needed)
-            $rsa_key = null;
-            if (in_array($encryption_method, ['rsa', 'hybrid'])) {
-                $rsa_key = $this->get_server_rsa_key();
-                if (!$rsa_key) {
-                    throw new Exception('Failed to get server RSA public key for registration.');
-                }
+            // 1. Create a temporary AES key: 256 bits, CBC Mode, PKCS7 padding
+            $aes_key = $encryption->generate_aes_key(); // 256-bit key
+            $iv = $encryption->generate_iv(); // 128-bit IV
 
-                // Validate RSA key format
-                if (!preg_match('/^[A-Za-z0-9\/+\=]+$/', $rsa_key)) {
-                    throw new Exception('Invalid RSA key format received from server');
-                }
+            $logger->log_api_interaction('Register Customer', [
+                'aes_key_generated' => true,
+                'iv_generated' => true
+            ], 'info', 'Generated temporary AES key and IV.');
 
-                // Check RSA key length
-                if (strlen($rsa_key) % 4 !== 0) {
-                    throw new Exception('Invalid RSA key length: ' . strlen($rsa_key) . ' (must be multiple of 4)');
-                }
-
-                // Log RSA key details
-                $logger->log_api_interaction('Register Customer', [
-                    'rsa_key_received' => !empty($rsa_key),
-                    'rsa_key_length' => strlen($rsa_key),
-                    'rsa_key_valid_format' => preg_match('/^[A-Za-z0-9\/+\=]+$/', $rsa_key) ? 'yes' : 'no',
-                    'rsa_key_valid_length' => (strlen($rsa_key) % 4 === 0) ? 'yes' : 'no',
-                    'rsa_key_contains_plus' => strpos($rsa_key, '+') !== false ? 'yes' : 'no',
-                    'rsa_key_contains_slash' => strpos($rsa_key, '/') !== false ? 'yes' : 'no',
-                    'rsa_key_contains_equals' => strpos($rsa_key, '=') !== false ? 'yes' : 'no',
-                    'rsa_key_first_10_chars' => substr($rsa_key, 0, 10),
-                    'rsa_key_last_10_chars' => substr($rsa_key, -10)
-                ], 'info', 'RSA public key info used for encryption.');
+            // 2. Call the server API GetServerRSAKey (URL)
+            $rsa_key = $this->get_server_rsa_key();
+            if (!$rsa_key) {
+                throw new Exception('Failed to get server RSA public key for registration.');
             }
 
-            // Step 2: Prepare the raw data payload for encryption (optimized for RSA size limits)
-            $registration_payload = [
-                'ak' => $user_data['aes_key'] ?? '',  // aesKey - shortened
-                'n'  => $user_data['name'] ?? '',     // name - shortened
-                'e'  => $user_data['email'] ?? '',    // email - shortened
-                'p'  => isset($user_data['password']) ? hash('sha256', $user_data['password']) : '', // password - shortened
-                't'  => $user_data['tools'] ?? [],    // tools - shortened
-                'ts' => time()                        // timestamp - shortened
+            // 3. Base64-decode this key to binary (done in encryption class)
+
+            // 4. Create the RegisterCustomer request + JSON-serialize the request, including the temporary AES key
+            $payload = [
+                'AesKey' => $aes_key, // AES key, Base64
+                'Name' => $user_data['name'] ?? '',
+                'Description' => $user_data['description'] ?? '',
+                'Email' => $user_data['email'] ?? '',
+                'Password' => isset($user_data['password']) ? hash('sha256', $user_data['password']) : '',
+                'Tools' => $user_data['tools'] ?? [],
+                'Notes' => $user_data['notes'] ?? ''
             ];
 
-            // Log form data (without sensitive information)
-            $logger->log_api_interaction('Register Customer', [
-                'email' => $user_data['email'] ?? '',
-                'has_name' => !empty($user_data['name']),
-                'has_password' => !empty($user_data['password']),
-                'tools_count' => count($user_data['tools'] ?? []),
-                'encryption_method' => $encryption_method
-            ], 'info', 'Form data extracted for registration.');
-
-            // Step 3: Convert the payload to a JSON string.
-            $json_payload = json_encode($registration_payload);
+            $json_payload = json_encode($payload);
             if ($json_payload === false) {
                 throw new Exception('Failed to encode registration payload to JSON: ' . json_last_error_msg());
             }
 
-            // Step 5: Encrypt the JSON payload based on the chosen method
-            $encrypted_payload = '';
-            $register_user_b64 = '';
-
-            // Only RSA encryption is supported for this endpoint
-            if (strlen($json_payload) > 245) {
-                throw new Exception('Payload too large for RSA encryption (' . strlen($json_payload) . ' bytes). Max allowed is 245 bytes. Optimize your data.');
-            }
+            // 5. Use the server RSA key to encrypt the serialized request
             $encrypted_payload = $encryption->encrypt_data_with_rsa($json_payload, $rsa_key);
             if (empty($encrypted_payload)) {
                 throw new Exception('Failed to encrypt the registration JSON payload with RSA.');
             }
 
-            // Log encryption process
-            $logger->log_api_interaction('Register Customer', [
-                'json_payload_length' => strlen($json_payload),
-                'encrypted_payload_length' => strlen($encrypted_payload),
-                'no_wrapper' => true,
-                'encryption_method' => 'rsa',
-                'rsa_encryption_success' => !empty($encrypted_payload),
-                'encrypted_data_valid_base64' => preg_match('/^[A-Za-z0-9\/+\=]+$/', $encrypted_payload) ? 'yes' : 'no',
-                'encrypted_data_length_valid' => (strlen($encrypted_payload) % 4 === 0) ? 'yes' : 'no',
-                'encrypted_data_contains_plus' => strpos($encrypted_payload, '+') !== false ? 'yes' : 'no',
-                'encrypted_data_contains_slash' => strpos($encrypted_payload, '/') !== false ? 'yes' : 'no',
-                'encrypted_data_contains_equals' => strpos($encrypted_payload, '=') !== false ? 'yes' : 'no',
-                'encrypted_data_first_20_chars' => substr($encrypted_payload, 0, 20),
-                'encrypted_data_last_20_chars' => substr($encrypted_payload, -20),
-                'encrypted_data_is_binary' => !mb_check_encoding($encrypted_payload, 'UTF-8') ? 'yes' : 'no'
-            ], 'info', 'Encryption process completed with rsa method (no wrapper).');
+            // 6. Base64 encode the encrypted request
+            $encoded_payload = $encrypted_payload; // Already base64 encoded
 
-            // For RegisterCustomer, send only the RSA-encrypted data (no wrapper)
-            $register_user_b64 = $encrypted_payload;
+            $request_url = $this->api_base_url . '/Customers/RegisterCustomer';
 
-            // Validate Base64 format immediately after encryption
-            if (!preg_match('/^[A-Za-z0-9\/+\=]+$/', $register_user_b64)) {
-                $invalid_chars = preg_replace('/[A-Za-z0-9\/+\=]/', '', $register_user_b64);
-                throw new Exception('Invalid Base64 format detected in encrypted payload. Invalid characters: ' . bin2hex($invalid_chars));
-            }
-
-            // Check if Base64 length is valid (must be multiple of 4)
-            if (strlen($register_user_b64) % 4 !== 0) {
-                throw new Exception('Invalid Base64 length: ' . strlen($register_user_b64) . ' (must be multiple of 4)');
-            }
-
-            // Test Base64 decode/encode to ensure it's valid
-            $decoded_test = base64_decode($register_user_b64, true);
-            if ($decoded_test === false) {
-                throw new Exception('Base64 decode test failed - invalid Base64 string');
-            }
-            $reencoded_test = base64_encode($decoded_test);
-            if ($reencoded_test !== $register_user_b64) {
-                throw new Exception('Base64 re-encode test failed - string was modified');
-            }
-
-            // Log the actual Base64 string and its length
-            $logger->log_api_interaction('Register Customer', [
-                'base64_payload_length' => strlen($register_user_b64),
-                'base64_payload_first20' => substr($register_user_b64, 0, 20),
-                'base64_payload_last20' => substr($register_user_b64, -20),
-                'base64_invalid_chars' => preg_match('/[^A-Za-z0-9\/+\=]/', $register_user_b64) ? 'yes' : 'no',
-                'base64_full_payload' => $register_user_b64, // Log the full Base64 string
-                'base64_contains_plus' => strpos($register_user_b64, '+') !== false ? 'yes' : 'no',
-                'base64_contains_slash' => strpos($register_user_b64, '/') !== false ? 'yes' : 'no',
-                'base64_contains_equals' => strpos($register_user_b64, '=') !== false ? 'yes' : 'no',
-                'base64_char_count_plus' => substr_count($register_user_b64, '+'),
-                'base64_char_count_slash' => substr_count($register_user_b64, '/'),
-                'base64_char_count_equals' => substr_count($register_user_b64, '='),
-                'base64_char_count_percent' => substr_count($register_user_b64, '%'),
-                'base64_char_count_space' => substr_count($register_user_b64, ' '),
-                'base64_char_count_newline' => substr_count($register_user_b64, "\n"),
-                'base64_char_count_cr' => substr_count($register_user_b64, "\r"),
-                'base64_char_count_tab' => substr_count($register_user_b64, "\t"),
-            ], 'debug', 'Base64-encoded RSA payload before sending.', JSON_UNESCAPED_SLASHES);
-
-            // Log the RSA public key fingerprint (SHA-256)
-            $rsa_key_fingerprint = null;
-            if ($rsa_key) {
-                $pem = $encryption->convert_to_pem_format($rsa_key);
-                $pem_clean = preg_replace('/-----.*-----|\s/', '', $pem);
-                $rsa_key_fingerprint = hash('sha256', base64_decode($pem_clean));
-            }
-            $logger->log_api_interaction('Register Customer', [
-                'rsa_key_fingerprint_sha256' => $rsa_key_fingerprint,
-                'rsa_key_length' => strlen($rsa_key),
-                'rsa_key_first20' => substr($rsa_key, 0, 20),
-                'rsa_key_last20' => substr($rsa_key, -20),
-            ], 'debug', 'RSA public key info used for encryption.');
-
-            // Step 8: Send the registration request
-            // Send Base64 data as query parameter with PUT method (per Swagger documentation)
-            $encoded_base64 = urlencode($register_user_b64);
-            $request_url = $this->api_base_url . '/Customers/RegisterCustomer?registerCustomerB64=' . $encoded_base64;
-
-            // Log detailed information about the Base64 and URL encoding
             $logger->log_api_interaction('Register Customer', [
                 'request_url' => $request_url,
                 'method' => 'PUT',
-                'original_base64' => $register_user_b64,
-                'base64_length' => strlen($register_user_b64),
-                'base64_contains_plus' => strpos($register_user_b64, '+') !== false ? 'yes' : 'no',
-                'base64_contains_slash' => strpos($register_user_b64, '/') !== false ? 'yes' : 'no',
-                'base64_contains_equals' => strpos($register_user_b64, '=') !== false ? 'yes' : 'no',
-                'base64_is_valid' => preg_match('/^[A-Za-z0-9\\/+\\=]+$/', $register_user_b64) ? 'yes' : 'no',
-                'base64_length_valid' => (strlen($register_user_b64) % 4 === 0) ? 'yes' : 'no',
-                'url_encoded_base64' => $encoded_base64,
-                'url_encoded_length' => strlen($encoded_base64),
-                'encoding_method' => 'url_query_put',
-                'full_request_url' => $request_url
-            ], 'info', 'Sending registration request with PUT method and query parameter.');
+                'json_payload' => $json_payload,
+                'encrypted_payload' => $encrypted_payload,
+                'payload_length' => strlen($encrypted_payload),
+                'aes_key_included' => true,
+                'iv_included' => true
+            ], 'info', 'Sending registration request with RSA encrypted payload including AES key and IV.');
 
+            // 7. Call RegisterCustomer with the encrypted payload
             $response = wp_remote_request($request_url, [
                 'method' => 'PUT',
-                'timeout' => 30,
-                'sslverify' => true,
                 'headers' => [
-                    'Accept' => 'application/json'
-                ]
-                // No body!
+                    'Accept' => 'application/json',
+                    'Content-Type' => 'application/json'
+                ],
+                'body' => $encoded_payload, // просто base64-рядок, без JSON-обгортки
+                'timeout' => 30
             ]);
 
             if (is_wp_error($response)) {
@@ -342,42 +244,59 @@ class API
             $logger->log_api_interaction('Register Customer', [
                 'response_code' => $response_code,
                 'response_body' => $response_body,
-                'encryption_method' => $encryption_method,
-                'response_headers' => wp_remote_retrieve_headers($response),
-                'response_error' => is_wp_error($response) ? $response->get_error_message() : null,
                 'request_url_sent' => $request_url,
                 'request_method_sent' => 'PUT',
-                'original_base64_sent' => $register_user_b64,
+                'encrypted_sent' => $encoded_payload
             ], $response_code === 200 ? 'success' : 'error', 'Registration response received.');
 
             if ($response_code !== 200) {
                 throw new Exception('Registration failed: HTTP ' . $response_code . ' - ' . $response_body);
             }
 
-            // Step 9: Parse the response
+            // 8. The response will be encrypted to the temporary AES key; decrypt it
             $response_data = json_decode($response_body, true);
-            if (!$response_data || !isset($response_data['customerId'])) {
+            if (!$response_data) {
+                throw new Exception('Invalid response format: not JSON');
+            }
+
+            // Check if response is encrypted
+            if (isset($response_data['encryptedResponse'])) {
+                // Decrypt the response using our temporary AES key
+                $decrypted_response = $encryption->decrypt_with_aes(
+                    $response_data['encryptedResponse'],
+                    base64_decode($aes_key),
+                    $iv
+                );
+
+                $response_data = json_decode($decrypted_response, true);
+                if (!$response_data) {
+                    throw new Exception('Failed to decode decrypted response');
+                }
+            }
+
+            if (!isset($response_data['customerId'])) {
                 throw new Exception('Invalid response format: missing customerId');
             }
 
             $customer_id = (int) $response_data['customerId'];
-
-            // Step 10: Save user data for future use
             $user_name = $user_data['name'] ?? '';
             $permanent_aes_key = $response_data['permanentAesKey'] ?? $response_data['aesKey'] ?? '';
+
+            // Cache the username, CustomerId, and the returned AES key
             \DIT\save_user_data($user_name, $customer_id, $permanent_aes_key);
 
             $logger->log_api_interaction('Register Customer', [
                 'customer_id' => $customer_id,
-                'encryption_method' => $encryption_method
-            ], 'success', 'Customer registered successfully with ' . $encryption_method . ' encryption.');
+                'encryption_method' => 'rsa',
+                'response_decrypted' => true
+            ], 'success', 'Customer registered successfully with RSA encryption.');
 
             return $customer_id;
         } catch (Exception $e) {
             $logger->log_api_interaction('Register Customer', [
                 'error' => $e->getMessage(),
-                'encryption_method' => $encryption_method
-            ], 'error', 'Registration failed with ' . $encryption_method . ' encryption.');
+                'encryption_method' => 'rsa'
+            ], 'error', 'Registration failed with RSA encryption.');
             error_log('DIT Integration: Registration failed - ' . $e->getMessage());
             return null;
         }
@@ -779,5 +698,466 @@ class API
         $encryption->set_user_permanent_aes_key($permanent_aes_key);
         error_log('DIT Integration: Set permanent AES key as active for customer ID: ' . $customer_id);
         return true;
+    }
+
+    /**
+     * Register a new customer using hybrid AES+RSA encryption
+     *
+     * @param array $user_data User data to register
+     * @return int|null Customer ID or null on failure
+     */
+    public function register_customer_hybrid(array $user_data): ?int
+    {
+        $core = \DIT\Core::get_instance();
+        $logger = $core->logger;
+        $encryption = $core->encryption;
+
+        $logger->log_api_interaction('Register Customer Hybrid', [
+            'encryption_method' => 'hybrid'
+        ], 'info', 'Starting hybrid registration process.');
+
+        try {
+            // 1. Get RSA public key
+            $rsa_key = $this->get_server_rsa_key();
+            if (!$rsa_key) {
+                throw new \Exception('Failed to get server RSA public key for registration.');
+            }
+
+            // 2. Generate AES key and IV
+            $aes_key = base64_decode($encryption->generate_aes_key()); // 32 bytes
+            $iv = base64_decode($encryption->generate_iv()); // 16 bytes
+
+            // 3. Prepare payload (повний, не обрізаний)
+            $payload = [
+                'name' => $user_data['name'] ?? '',
+                'email' => $user_data['email'] ?? '',
+                'password' => isset($user_data['password']) ? hash('sha256', $user_data['password']) : '',
+                'tools' => $user_data['tools'] ?? [],
+                'ts' => time()
+            ];
+            $json_payload = json_encode($payload);
+            if ($json_payload === false) {
+                throw new \Exception('Failed to encode registration payload to JSON: ' . json_last_error_msg());
+            }
+
+            // 4. Encrypt payload with AES
+            $payload_b64 = $encryption->encrypt_with_aes($json_payload, $aes_key, base64_encode($iv));
+
+            // 5. Encrypt AES key with RSA
+            $encrypted_key_b64 = $encryption->encrypt_with_rsa($aes_key, $rsa_key);
+
+            // 6. Prepare request body
+            $request_body = json_encode([
+                'encryptedKeyB64' => $encrypted_key_b64,
+                'ivB64' => base64_encode($iv),
+                'payloadB64' => $payload_b64
+            ]);
+
+            $request_url = $this->api_base_url . '/Customers/RegisterCustomerHybrid';
+
+            $logger->log_api_interaction('Register Customer Hybrid', [
+                'request_url' => $request_url,
+                'request_body' => $request_body
+            ], 'info', 'Sending hybrid registration request.');
+
+            $response = wp_remote_request($request_url, [
+                'method' => 'PUT',
+                'timeout' => 30,
+                'sslverify' => true,
+                'headers' => [
+                    'Accept' => 'application/json',
+                    'Content-Type' => 'application/json'
+                ],
+                'body' => $request_body
+            ]);
+
+            if (is_wp_error($response)) {
+                throw new \Exception('Registration request failed: ' . $response->get_error_message());
+            }
+
+            $response_code = wp_remote_retrieve_response_code($response);
+            $response_body = wp_remote_retrieve_body($response);
+
+            $logger->log_api_interaction('Register Customer Hybrid', [
+                'response_code' => $response_code,
+                'response_body' => $response_body,
+                'request_url_sent' => $request_url,
+                'request_method_sent' => 'PUT',
+                'request_body_sent' => $request_body
+            ], $response_code === 200 ? 'success' : 'error', 'Hybrid registration response received.');
+
+            if ($response_code !== 200) {
+                throw new \Exception('Registration failed: HTTP ' . $response_code . ' - ' . $response_body);
+            }
+
+            $response_data = json_decode($response_body, true);
+            if (!$response_data || !isset($response_data['customerId'])) {
+                throw new \Exception('Invalid response format: missing customerId');
+            }
+
+            $customer_id = (int) $response_data['customerId'];
+            $user_name = $user_data['name'] ?? '';
+            $permanent_aes_key = $response_data['permanentAesKey'] ?? $response_data['aesKey'] ?? '';
+            \DIT\save_user_data($user_name, $customer_id, $permanent_aes_key);
+
+            $logger->log_api_interaction('Register Customer Hybrid', [
+                'customer_id' => $customer_id
+            ], 'success', 'Customer registered successfully with hybrid encryption.');
+
+            return $customer_id;
+        } catch (\Exception $e) {
+            $logger->log_api_interaction('Register Customer Hybrid', [
+                'error' => $e->getMessage()
+            ], 'error', 'Hybrid registration failed.');
+            error_log('DIT Integration: Hybrid registration failed - ' . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Register a new customer using the new two-step process
+     * Step 1: PrepareRegisterCustomerRequest - encrypts data locally with temporary AES key
+     * Step 2: RegisterCustomer - sends encrypted data and receives permanent AES key
+     *
+     * @param array $user_data User data to register
+     * @return int|null Customer ID or null on failure
+     */
+    public function register_customer_prepare(array $user_data): ?int
+    {
+        $core = Core::get_instance();
+        $logger = $core->logger;
+        $encryption = $core->encryption;
+
+        $logger->log_api_interaction('Register Customer Two-Step', [
+            'encryption_method' => 'rsa_two_step',
+            'user_data_keys' => array_keys($user_data)
+        ], 'info', 'Starting two-step registration process.');
+
+        try {
+            // Step 1: Generate temporary AES key locally (as per documentation)
+            $temporary_aes_key = $encryption->generate_aes_key(); // 256-bit temporary key
+
+            $logger->log_api_interaction('Register Customer Two-Step', [
+                'temporary_aes_key_generated' => true
+            ], 'info', 'Generated temporary AES key locally.');
+
+            // Step 2: Prepare the request data with correct field names as server expects
+            $request_data = [
+                'Name' => $user_data['name'] ?? '',
+                'Email' => $user_data['email'] ?? '',
+                'Password' => $user_data['password'] ?? '', // Plain password as server expects
+                'Description' => $user_data['description'] ?? '',
+                'Notes' => $user_data['notes'] ?? '',
+                'Tools' => $user_data['tools'] ?? [],
+                'AesKey' => $temporary_aes_key, // Temporary AES key
+                'SubscriptionTime' => $user_data['subscriptionTime'] ?? '365 days'
+            ];
+
+            $json_request = json_encode($request_data);
+            if ($json_request === false) {
+                throw new Exception('Failed to encode registration request to JSON: ' . json_last_error_msg());
+            }
+
+            // Step 3: Call PrepareRegisterCustomerRequest with unencrypted data
+            $prepare_url = $this->api_base_url . '/Customers/PrepareRegisterCustomerRequest';
+
+            $logger->log_api_interaction('Prepare Register Customer', [
+                'request_url' => $prepare_url,
+                'method' => 'PUT',
+                'json_payload' => $json_request,
+                'request_length' => strlen($json_request),
+                'temporary_aes_key_included' => true
+            ], 'info', 'Sending prepare request with unencrypted data.');
+
+            $prepare_response = wp_remote_request($prepare_url, [
+                'method' => 'PUT',
+                'headers' => [
+                    'Accept' => 'application/json',
+                    'Content-Type' => 'application/json'
+                ],
+                'body' => $json_request, // Send unencrypted JSON data
+                'timeout' => 30
+            ]);
+
+            if (is_wp_error($prepare_response)) {
+                throw new Exception('Prepare request failed: ' . $prepare_response->get_error_message());
+            }
+
+            $prepare_code = wp_remote_retrieve_response_code($prepare_response);
+            $prepare_body = wp_remote_retrieve_body($prepare_response);
+
+            $logger->log_api_interaction('Prepare Register Customer', [
+                'response_code' => $prepare_code,
+                'response_body' => $prepare_body
+            ], $prepare_code === 200 ? 'success' : 'error', 'Prepare response received.');
+
+            if ($prepare_code !== 200) {
+                throw new Exception('Prepare request failed: HTTP ' . $prepare_code . ' - ' . $prepare_body);
+            }
+
+            // Step 4: Parse prepare response to get permanent AES key
+            $permanent_aes_key = '';
+            if (!empty($prepare_body)) {
+                $prepare_data = json_decode($prepare_body, true);
+                if ($prepare_data && isset($prepare_data['aesKey'])) {
+                    $permanent_aes_key = $prepare_data['aesKey']; // Hex string as per documentation
+                    $logger->log_api_interaction('Prepare Register Customer', [
+                        'permanent_aes_key_received' => true,
+                        'permanent_aes_key_length' => strlen($permanent_aes_key)
+                    ], 'success', 'Permanent AES key received from prepare response.');
+                } else {
+                    // If response is not JSON or doesn't contain aesKey, treat as success
+                    $logger->log_api_interaction('Prepare Register Customer', [
+                        'note' => 'Prepare response does not contain permanent AES key, will use temporary key'
+                    ], 'info', 'Prepare response handled as success indicator.');
+                }
+            }
+
+            // Step 5: Get server RSA public key for final registration
+            $rsa_key = $this->get_server_rsa_key();
+            if (!$rsa_key) {
+                throw new Exception('Failed to get server RSA public key for final registration.');
+            }
+
+            // Step 6: Prepare final registration data with permanent AES key
+            $final_request_data = [
+                'AesKey' => $permanent_aes_key ?: $temporary_aes_key, // Use permanent key if available
+                'Name' => $user_data['name'] ?? '',
+                'Description' => $user_data['description'] ?? '',
+                'Email' => $user_data['email'] ?? '',
+                'Password' => isset($user_data['password']) ? hash('sha256', $user_data['password']) : '',
+                'Tools' => $user_data['tools'] ?? [],
+                'Notes' => $user_data['notes'] ?? '',
+                'SubscriptionTime' => $user_data['subscriptionTime'] ?? '365 days'
+            ];
+
+            $final_json_payload = json_encode($final_request_data);
+            if ($final_json_payload === false) {
+                throw new Exception('Failed to encode final registration payload to JSON: ' . json_last_error_msg());
+            }
+
+            // Step 7: Encrypt final payload with RSA
+            $encrypted_final_payload = $encryption->encrypt_data_with_rsa($final_json_payload, $rsa_key);
+            if (empty($encrypted_final_payload)) {
+                throw new Exception('Failed to encrypt final registration payload with RSA.');
+            }
+
+            // Step 8: Call RegisterCustomer with encrypted data
+            $register_url = $this->api_base_url . '/Customers/RegisterCustomer';
+
+            $logger->log_api_interaction('Register Customer', [
+                'request_url' => $register_url,
+                'method' => 'PUT',
+                'encrypted_payload_length' => strlen($encrypted_final_payload),
+                'permanent_aes_key_used' => !empty($permanent_aes_key)
+            ], 'info', 'Sending encrypted registration data.');
+
+            $register_response = wp_remote_request($register_url, [
+                'method' => 'PUT',
+                'headers' => [
+                    'Accept' => 'application/json',
+                    'Content-Type' => 'application/json'
+                ],
+                'body' => $encrypted_final_payload, // Send RSA encrypted data
+                'timeout' => 30
+            ]);
+
+            if (is_wp_error($register_response)) {
+                throw new Exception('Registration request failed: ' . $register_response->get_error_message());
+            }
+
+            $register_code = wp_remote_retrieve_response_code($register_response);
+            $register_body = wp_remote_retrieve_body($register_response);
+
+            $logger->log_api_interaction('Register Customer', [
+                'response_code' => $register_code,
+                'response_body' => $register_body,
+                'request_url_sent' => $register_url,
+                'request_method_sent' => 'PUT'
+            ], $register_code === 200 ? 'success' : 'error', 'Registration response received.');
+
+            if ($register_code !== 200) {
+                throw new Exception('Registration failed: HTTP ' . $register_code . ' - ' . $register_body);
+            }
+
+            // Step 9: Parse the registration response
+            $response_data = json_decode($register_body, true);
+            if (!$response_data) {
+                throw new Exception('Invalid response format: not JSON');
+            }
+
+            if (!isset($response_data['customerId'])) {
+                throw new Exception('Invalid response format: missing customerId');
+            }
+
+            $customer_id = (int) $response_data['customerId'];
+            $user_name = $user_data['name'] ?? '';
+
+            // Use permanent AES key from prepare response, or fallback to temporary key
+            $final_aes_key = $permanent_aes_key ?: $temporary_aes_key;
+
+            // Cache the username, CustomerId, and the permanent AES key
+            \DIT\save_user_data($user_name, $customer_id, $final_aes_key);
+
+            $logger->log_api_interaction('Register Customer Two-Step', [
+                'customer_id' => $customer_id,
+                'encryption_method' => 'rsa_two_step',
+                'permanent_aes_key_stored' => !empty($permanent_aes_key),
+                'temporary_aes_key_used' => empty($permanent_aes_key),
+                'final_aes_key_length' => strlen($final_aes_key)
+            ], 'success', 'Customer registered successfully with two-step process.');
+
+            return $customer_id;
+        } catch (Exception $e) {
+            $logger->log_api_interaction('Register Customer Two-Step', [
+                'error' => $e->getMessage(),
+                'encryption_method' => 'rsa_two_step'
+            ], 'error', 'Registration failed with two-step process.');
+            error_log('DIT Integration: Registration failed - ' . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Reprovision customer credentials using the two-step process
+     * Step 1: PrepareReprovisionCustomerRequest - encrypts data locally
+     * Step 2: ReprovisionCustomer - sends encrypted data and retrieves credentials
+     *
+     * @param string $email Customer email
+     * @param string $password Customer password
+     * @return array|null Reprovision data or null on failure
+     */
+    public function reprovision_customer(string $email, string $password): ?array
+    {
+        $core = Core::get_instance();
+        $logger = $core->logger;
+
+        $logger->log_api_interaction('Reprovision Customer Two-Step', [
+            'encryption_method' => 'rsa_two_step',
+            'email' => $email
+        ], 'info', 'Starting two-step reprovision process.');
+
+        try {
+            // Step 1: Prepare the reprovision request data
+            $request_data = [
+                'Email' => $email,
+                'Password' => $password
+            ];
+
+            $json_request = json_encode($request_data);
+            if ($json_request === false) {
+                throw new Exception('Failed to encode reprovision request to JSON: ' . json_last_error_msg());
+            }
+
+            // Step 1: Call PrepareReprovisionCustomerRequest
+            $prepare_url = $this->api_base_url . '/Customers/PrepareReprovisionCustomerRequest';
+
+            $logger->log_api_interaction('Prepare Reprovision Customer', [
+                'request_url' => $prepare_url,
+                'method' => 'PUT',
+                'json_request' => $json_request,
+                'request_length' => strlen($json_request)
+            ], 'info', 'Sending prepare reprovision request (data encrypted locally).');
+
+            $prepare_response = wp_remote_request($prepare_url, [
+                'method' => 'PUT',
+                'headers' => [
+                    'Accept' => '*/*',
+                    'Content-Type' => 'application/json'
+                ],
+                'body' => $json_request,
+                'timeout' => 30
+            ]);
+
+            if (is_wp_error($prepare_response)) {
+                throw new Exception('Prepare reprovision request failed: ' . $prepare_response->get_error_message());
+            }
+
+            $prepare_code = wp_remote_retrieve_response_code($prepare_response);
+            $prepare_body = wp_remote_retrieve_body($prepare_response);
+
+            $logger->log_api_interaction('Prepare Reprovision Customer', [
+                'response_code' => $prepare_code,
+                'response_body' => $prepare_body
+            ], $prepare_code === 200 ? 'success' : 'error', 'Prepare reprovision response received.');
+
+            if ($prepare_code !== 200) {
+                throw new Exception('Prepare reprovision request failed: HTTP ' . $prepare_code . ' - ' . $prepare_body);
+            }
+
+            // Step 2: Call ReprovisionCustomer to retrieve encrypted data
+            $reprovision_url = $this->api_base_url . '/Customers/ReprovisionCustomer';
+
+            $logger->log_api_interaction('Reprovision Customer', [
+                'request_url' => $reprovision_url,
+                'method' => 'PUT'
+            ], 'info', 'Retrieving encrypted reprovision data.');
+
+            $reprovision_response = wp_remote_request($reprovision_url, [
+                'method' => 'PUT',
+                'headers' => [
+                    'Accept' => '*/*',
+                    'Content-Type' => 'application/json'
+                ],
+                'body' => '', // Encrypted data is handled by server
+                'timeout' => 30
+            ]);
+
+            if (is_wp_error($reprovision_response)) {
+                throw new Exception('Reprovision request failed: ' . $reprovision_response->get_error_message());
+            }
+
+            $reprovision_code = wp_remote_retrieve_response_code($reprovision_response);
+            $reprovision_body = wp_remote_retrieve_body($reprovision_response);
+
+            $logger->log_api_interaction('Reprovision Customer', [
+                'response_code' => $reprovision_code,
+                'response_body' => $reprovision_body,
+                'request_url_sent' => $reprovision_url,
+                'request_method_sent' => 'PUT'
+            ], $reprovision_code === 200 ? 'success' : 'error', 'Reprovision response received.');
+
+            if ($reprovision_code !== 200) {
+                throw new Exception('Reprovision failed: HTTP ' . $reprovision_code . ' - ' . $reprovision_body);
+            }
+
+            // Parse the response
+            $response_data = json_decode($reprovision_body, true);
+            if (!$response_data) {
+                throw new Exception('Invalid response format: not JSON');
+            }
+
+            if (!isset($response_data['customerId'])) {
+                throw new Exception('Invalid response format: missing customerId');
+            }
+
+            $customer_id = (int) $response_data['customerId'];
+            $aes_key = $response_data['aesKey'] ?? '';
+            $error_code = $response_data['error'] ?? 0;
+
+            // Cache the customer data
+            \DIT\save_user_data($email, $customer_id, $aes_key);
+
+            $result = [
+                'customerId' => $customer_id,
+                'aesKey' => $aes_key,
+                'error' => $error_code
+            ];
+
+            $logger->log_api_interaction('Reprovision Customer Two-Step', [
+                'customer_id' => $customer_id,
+                'encryption_method' => 'rsa_two_step',
+                'error_code' => $error_code
+            ], 'success', 'Customer reprovisioned successfully with two-step process.');
+
+            return $result;
+        } catch (Exception $e) {
+            $logger->log_api_interaction('Reprovision Customer Two-Step', [
+                'error' => $e->getMessage(),
+                'encryption_method' => 'rsa_two_step'
+            ], 'error', 'Reprovision failed with two-step process.');
+            error_log('DIT Integration: Reprovision failed - ' . $e->getMessage());
+            return null;
+        }
     }
 }

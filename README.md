@@ -148,6 +148,26 @@ Class for WPForms integration.
 - **`init()`** - Initialize integration
 - **`handle_form_submission(array $fields, array $entry, array $form_data)`** - Handle form submission
 - **`register_user_from_form(array $form_data)`** - Register user from form
+- **`extract_user_data(array $submitted_data, array $form_data)`** - Extract and process form data
+- **`process_checkbox_values(array $fields, array $entry, array $form_data)`** - Process checkbox values (deprecated)
+
+#### Checkbox Processing
+
+The plugin automatically processes checkbox fields to extract tool selections. Checkboxes must follow the format:
+
+```
+Tool Name | Number
+```
+
+Example:
+- `Data Integrity Tool | 0`
+- `Audit Trail | 1`
+- `Compliance Checker | 2`
+- `Report Generator | 3`
+
+The plugin extracts the numbers and sends them as the `tools` array to the API. If no checkboxes are selected, an empty array `[]` is sent.
+
+For detailed setup instructions, see [CHECKBOX_SETUP_GUIDE.md](CHECKBOX_SETUP_GUIDE.md).
 
 ## API Endpoints
 
@@ -266,12 +286,36 @@ $auth_data = $api->login('test@example.com', hash('sha256', 'password'));
 - `test-autoloader.php` - Test autoloader
 - `test-encoding-simple.php` - Test encoding
 - `test-registration-fixed.php` - Test registration
+- `test-checkbox-processing.php` - Test checkbox processing
+- `test-cookie-storage.php` - Test cookie storage
+- `test-cookie-size.php` - Test cookie size limits
 
 ### Run tests:
 ```bash
 php test-encryption-wrapper.php
 php test-simple-encryption-wrapper.php
+php test-checkbox-processing.php
 ```
+
+### Checkbox Testing
+
+To test checkbox processing:
+
+1. **Run the test script:**
+   ```bash
+   php test-checkbox-processing.php
+   ```
+
+2. **Test different scenarios:**
+   - Single checkbox selection
+   - Multiple checkbox selections
+   - No checkbox selection (default values)
+   - Mixed tool selections
+
+3. **Verify output:**
+   - Check that numbers are extracted correctly
+   - Verify tools array format
+   - Confirm default values when no selection
 
 ## Known Issues
 

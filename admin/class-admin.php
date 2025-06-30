@@ -20,8 +20,8 @@ class Admin
     {
         error_log('DIT Integration: Admin class init started');
 
-        // Add admin menu
-        add_action('admin_menu', [$this, 'add_admin_menu']);
+        // Add admin menu with higher priority
+        add_action('admin_menu', [$this, 'add_admin_menu'], 20);
         add_action('admin_init', [$this, 'register_settings']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_scripts']);
 
@@ -37,6 +37,9 @@ class Admin
         // Handle log downloads
         add_action('admin_init', [$this, 'handle_log_download']);
 
+        // Add additional hook for menu creation
+        add_action('init', [$this, 'add_admin_menu'], 20);
+
         error_log('DIT Integration: Admin class init completed');
     }
 
@@ -46,6 +49,18 @@ class Admin
     public function add_admin_menu()
     {
         error_log('DIT Integration: Adding admin menu');
+
+        // Check if we're in admin area
+        if (!is_admin()) {
+            error_log('DIT Integration: Not in admin area, skipping menu creation');
+            return;
+        }
+
+        // Check user capabilities
+        if (!current_user_can('manage_options')) {
+            error_log('DIT Integration: User does not have manage_options capability');
+            return;
+        }
 
         // Add main menu page
         $main_page = add_menu_page(
@@ -88,9 +103,17 @@ class Admin
         );
 
         add_settings_field(
-            'active_forms',
-            __('Active Forms', 'dit-integration'),
-            [$this, 'render_active_forms_field'],
+            'signup_form',
+            __('Sign Up Form', 'dit-integration'),
+            [$this, 'render_signup_form_field'],
+            'dit-integration',
+            'dit_general'
+        );
+
+        add_settings_field(
+            'signin_form',
+            __('Sign In Form', 'dit-integration'),
+            [$this, 'render_signin_form_field'],
             'dit-integration',
             'dit_general'
         );
@@ -250,28 +273,51 @@ class Admin
     }
 
     /**
-     * Render active forms field
+     * Render signup form field
      */
-    public function render_active_forms_field()
+    public function render_signup_form_field()
     {
         $settings = get_option('dit_settings', []);
-        $active_forms = $settings['active_forms'] ?? [];
+        $signup_form = $settings['signup_form'] ?? '';
         $forms = $this->get_available_forms();
-
-        if (empty($forms)) {
-            echo '<p>' . esc_html__('No forms found. Please create a form first.', 'dit-integration') . '</p>';
-            return;
-        }
-
-        foreach ($forms as $form) {
 ?>
-            <label class="dit-form-field">
-                <input type="checkbox" name="dit_settings[active_forms][]" value="<?php echo esc_attr($form->ID); ?>"
-                    <?php checked(in_array($form->ID, $active_forms)); ?>>
-                <?php echo esc_html($form->post_title); ?>
-            </label><br>
-        <?php
-        }
+        <select id="dit_signup_form" name="dit_settings[signup_form]" class="regular-text">
+            <option value=""><?php _e('Select a form', 'dit-integration'); ?></option>
+            <?php if (!empty($forms)) : ?>
+                <?php foreach ($forms as $form) : ?>
+                    <option value="<?php echo esc_attr($form->ID); ?>"
+                        <?php selected($signup_form, $form->ID); ?>>
+                        <?php echo esc_html($form->post_title); ?>
+                    </option>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        </select>
+        <p class="description"><?php _e('Select the WPForms form for user registration.', 'dit-integration'); ?></p>
+    <?php
+    }
+
+    /**
+     * Render signin form field
+     */
+    public function render_signin_form_field()
+    {
+        $settings = get_option('dit_settings', []);
+        $signin_form = $settings['signin_form'] ?? '';
+        $forms = $this->get_available_forms();
+    ?>
+        <select id="dit_signin_form" name="dit_settings[signin_form]" class="regular-text">
+            <option value=""><?php _e('Select a form', 'dit-integration'); ?></option>
+            <?php if (!empty($forms)) : ?>
+                <?php foreach ($forms as $form) : ?>
+                    <option value="<?php echo esc_attr($form->ID); ?>"
+                        <?php selected($signin_form, $form->ID); ?>>
+                        <?php echo esc_html($form->post_title); ?>
+                    </option>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        </select>
+        <p class="description"><?php _e('Select the WPForms form for user login.', 'dit-integration'); ?></p>
+    <?php
     }
 
     /**
@@ -281,7 +327,7 @@ class Admin
     {
         $settings = get_option('dit_settings', []);
         $license_type = $settings['license_type'] ?? 'unlimited';
-        ?>
+    ?>
         <select id="dit-settings-license-type" name="dit_settings[license_type]">
             <option value="unlimited" <?php selected($license_type, 'unlimited'); ?>>
                 <?php esc_html_e('Unlimited', 'dit-integration'); ?>
@@ -365,8 +411,11 @@ class Admin
 
         $sanitized = [];
 
-        // Sanitize WPForms form
-        $sanitized['wpforms_form'] = isset($input['wpforms_form']) ? absint($input['wpforms_form']) : '';
+        // Sanitize Sign Up form
+        $sanitized['signup_form'] = isset($input['signup_form']) ? absint($input['signup_form']) : '';
+
+        // Sanitize Sign In form
+        $sanitized['signin_form'] = isset($input['signin_form']) ? absint($input['signin_form']) : '';
 
         // Sanitize license type
         $sanitized['license_type'] = isset($input['license_type']) ? sanitize_text_field($input['license_type']) : 'unlimited';

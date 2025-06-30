@@ -174,6 +174,15 @@ try {
     error_log('DIT Integration: Error during manual class loading: ' . $e->getMessage());
 }
 
+// Load helpers file with utility functions
+$helpers_file = DIT_PLUGIN_DIR . 'includes/helpers.php';
+if (file_exists($helpers_file)) {
+    require_once $helpers_file;
+    error_log('DIT Integration: Helpers file loaded successfully');
+} else {
+    error_log('DIT Integration: ERROR - Helpers file not found: ' . $helpers_file);
+}
+
 // Verify assets directory exists
 $assets_dir = DIT_PLUGIN_DIR . 'assets';
 $js_dir = $assets_dir . '/js';
@@ -296,7 +305,10 @@ register_activation_hook(__FILE__, 'activate_dit');
 register_deactivation_hook(__FILE__, 'deactivate_dit');
 
 // Initialize the plugin
-add_action('plugins_loaded', 'run_dit', 0);
+add_action('plugins_loaded', 'run_dit', 20);
+
+// Additional hook for admin initialization
+add_action('admin_init', 'run_dit', 10);
 
 /**
  * Initialize the plugin

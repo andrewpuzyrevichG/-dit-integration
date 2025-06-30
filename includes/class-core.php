@@ -104,6 +104,21 @@ class Core
         if (is_admin()) {
             error_log('DIT Integration: Initializing admin components');
             try {
+                // Manually load Admin class if not found
+                if (!class_exists('DIT\\Admin')) {
+                    error_log('DIT Integration: Admin class not found, trying to load manually');
+                    $admin_file = DIT_PLUGIN_DIR . 'admin/class-admin.php';
+                    error_log('DIT Integration: Looking for Admin file at: ' . $admin_file);
+                    error_log('DIT Integration: File exists: ' . (file_exists($admin_file) ? 'Yes' : 'No'));
+
+                    if (file_exists($admin_file)) {
+                        require_once $admin_file;
+                        error_log('DIT Integration: Admin file loaded manually');
+                    } else {
+                        error_log('DIT Integration: Admin file not found at: ' . $admin_file);
+                    }
+                }
+
                 if (class_exists('DIT\\Admin')) {
                     error_log('DIT Integration: Admin class found');
                     $this->admin = new Admin();
@@ -111,7 +126,7 @@ class Core
                     $this->admin->init();
                     error_log('DIT Integration: Admin initialized successfully');
                 } else {
-                    error_log('DIT Integration: Admin class not found');
+                    error_log('DIT Integration: Admin class not found after manual load');
                 }
             } catch (Exception $e) {
                 error_log('DIT Integration: Failed to initialize Admin - ' . $e->getMessage());

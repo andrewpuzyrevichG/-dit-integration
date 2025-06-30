@@ -36,6 +36,9 @@ class WPForms
         if (!class_exists('WPForms')) {
             error_log('DIT Integration: WPForms plugin is not active');
         }
+
+        // Hook to process checkbox values
+        add_action('wpforms_process_complete', [$this, 'process_checkbox_values'], 5, 4);
     }
 
     /**
@@ -51,12 +54,24 @@ class WPForms
         try {
             // Get settings
             $settings = get_option('dit_settings');
-            $selected_form = $settings['wpforms_form'] ?? '';
+            $signup_form = $settings['signup_form'] ?? '';
+            $signin_form = $settings['signin_form'] ?? '';
 
-            // Check if this form should be processed
-            if (empty($selected_form) || $form_data['id'] != $selected_form) {
-                return;
+            // Check if this form should be processed (either signup or signin)
+            if (empty($signup_form) && empty($signin_form)) {
+                return; // No forms configured
             }
+
+            $form_id = $form_data['id'];
+            $is_signup_form = ($form_id == $signup_form);
+            $is_signin_form = ($form_id == $signin_form);
+
+            if (!$is_signup_form && !$is_signin_form) {
+                return; // This form is not configured for processing
+            }
+
+            // Determine form type for logging
+            $form_type = $is_signup_form ? 'signup' : 'signin';
 
             // Get form fields
             $form_fields = $form_data['fields'];
@@ -82,6 +97,7 @@ class WPForms
             $logger->log_form_submission(
                 $form_data['id'],
                 [
+                    'form_type' => $form_type,
                     'all_fields_count' => count($submitted_data),
                     'all_field_types' => array_column($submitted_data, 'type'),
                     'all_field_ids' => array_keys($submitted_data),
@@ -94,19 +110,27 @@ class WPForms
             );
 
             // Process the form submission
-            $result = $this->process_form_submission($submitted_data, $form_data);
+            $result = $this->process_form_submission($submitted_data, $form_data, $form_type);
 
             // If this is an AJAX form submission, send JSON response
             if (wp_doing_ajax()) {
                 if ($result === true) {
+                    $success_message = $form_type === 'signup' ?
+                        __('Registration successful', 'dit-integration') :
+                        __('Login successful', 'dit-integration');
+
                     wp_send_json_success([
-                        'message' => __('Registration successful', 'dit-integration'),
+                        'message' => $success_message,
                         'redirect' => home_url()
                     ]);
                     exit;
                 } else {
+                    $error_message = $form_type === 'signup' ?
+                        __('Registration failed', 'dit-integration') :
+                        __('Login failed', 'dit-integration');
+
                     wp_send_json_error([
-                        'message' => __('Registration failed', 'dit-integration')
+                        'message' => $error_message
                     ]);
                     exit;
                 }
@@ -118,93 +142,104 @@ class WPForms
             // If this is an AJAX form submission, send JSON response
             if (wp_doing_ajax()) {
                 wp_send_json_error([
-                    'message' => __('An error occurred during registration', 'dit-integration')
+                    'message' => __('An error occurred during processing', 'dit-integration')
                 ]);
                 exit;
             }
         }
     }
 
-    private function process_form_submission($submitted_data, $form_data)
+    private function process_form_submission($submitted_data, $form_data, $form_type)
     {
         $core = Core::get_instance();
         $logger = $core->logger;
         $api = $core->api;
-        $encryption = $core->encryption;
 
         try {
-            // Check if encryption is available
-            if ($encryption === null) {
+            if ($form_type === 'signup') {
+                // Handle signup form
+                $user_data = $this->extract_user_data($submitted_data, $form_data);
+                if (empty($user_data)) {
+                    $logger->log_form_submission(
+                        $form_data['id'],
+                        ['form_type' => $form_type],
+                        'error',
+                        'Could not extract user data from signup form submission'
+                    );
+                    error_log('DIT Integration: Could not extract user data from signup form submission');
+                    return false;
+                }
+
+                // Register customer with DIT API
+                $customer_id = $api->register_customer($user_data);
+
+                if ($customer_id === null) {
+                    $logger->log_form_submission(
+                        $form_data['id'],
+                        ['form_type' => $form_type],
+                        'error',
+                        'Customer registration failed'
+                    );
+                    error_log('DIT Integration: Customer registration failed');
+                    return false;
+                }
+
                 $logger->log_form_submission(
                     $form_data['id'],
-                    [],
-                    'error',
-                    'Encryption instance is null - cannot generate AES key'
+                    [
+                        'form_type' => $form_type,
+                        'customer_id' => $customer_id
+                    ],
+                    'success',
+                    'Customer registration successful'
                 );
-                error_log('DIT Integration: Encryption instance is null - cannot generate AES key');
-                return false;
-            }
+            } elseif ($form_type === 'signin') {
+                // Handle signin form
+                $user_data = $this->extract_signin_data($submitted_data, $form_data);
+                if (empty($user_data)) {
+                    $logger->log_form_submission(
+                        $form_data['id'],
+                        ['form_type' => $form_type],
+                        'error',
+                        'Could not extract user data from signin form submission'
+                    );
+                    error_log('DIT Integration: Could not extract user data from signin form submission');
+                    return false;
+                }
 
-            // Extract user data from form submission
-            $user_data = $this->extract_user_data($submitted_data, $form_data);
-            if (empty($user_data)) {
+                // Login customer with DIT API
+                $login_result = $api->login($user_data['email'], hash('sha256', $user_data['password']));
+
+                if ($login_result === false) {
+                    $logger->log_form_submission(
+                        $form_data['id'],
+                        ['form_type' => $form_type],
+                        'error',
+                        'Customer login failed'
+                    );
+                    error_log('DIT Integration: Customer login failed');
+                    return false;
+                }
+
                 $logger->log_form_submission(
                     $form_data['id'],
-                    [],
-                    'error',
-                    'Could not extract user data from form submission'
+                    [
+                        'form_type' => $form_type,
+                        'email' => $user_data['email']
+                    ],
+                    'success',
+                    'Customer login successful'
                 );
-                error_log('DIT Integration: Could not extract user data from form submission');
-                return false;
-            }
-
-            // Додаємо генерацію AES-ключа для нового користувача
-            $user_data['aes_key'] = $encryption->generate_aes_key();
-
-            // Log essential user data (without sensitive information)
-            $logger->log_form_submission(
-                $form_data['id'],
-                [
-                    'email' => $user_data['email'],
-                    'has_password' => !empty($user_data['password']),
-                    'has_name' => !empty($user_data['first_name']) || !empty($user_data['last_name']),
-                    'aes_key_generated' => !empty($user_data['aes_key'])
-                ],
-                'info',
-                'User data extracted successfully'
-            );
-
-            // Register customer with DIT API
-            if ($api === null) {
-                $logger->log_form_submission(
-                    $form_data['id'],
-                    [],
-                    'error',
-                    'API instance is null - cannot register customer'
-                );
-                error_log('DIT Integration: API instance is null - cannot register customer');
-                return false;
-            }
-
-            // Call the API to register the customer using only RSA encryption
-            $customer_id = $api->register_customer_with_method($user_data, 'rsa');
-
-            if ($customer_id === null) {
-                $logger->log_form_submission(
-                    $form_data['id'],
-                    [],
-                    'error',
-                    'Customer registration failed'
-                );
-                error_log('DIT Integration: Customer registration failed');
-                return false;
             }
 
             return true;
         } catch (Exception $e) {
             $logger->log_form_submission(
                 $form_data['id'],
-                ['error' => $e->getMessage()],
+                [
+                    'form_type' => $form_type,
+                    'error' => $e->getMessage()
+                ],
                 'error',
                 'Exception during form processing'
             );
@@ -251,14 +286,54 @@ class WPForms
                     }
                     break;
                 case 'password':
-                    $user_data['password'] = $field_value;
-                    $user_data['password_hash'] = hash('sha256', $field_value);
+                    $user_data['password'] = $field_value; // Plain password as per API documentation
                     break;
                 case 'phone':
                     $user_data['phone'] = sanitize_text_field($field_value);
                     break;
                 case 'address':
                     $user_data['address'] = sanitize_textarea_field($field_value);
+                    break;
+                case 'textarea':
+                    // Use textarea for description or notes
+                    if (empty($user_data['description'])) {
+                        $user_data['description'] = sanitize_textarea_field($field_value);
+                    } else {
+                        $user_data['notes'] = sanitize_textarea_field($field_value);
+                    }
+                    break;
+                case 'checkbox':
+                    // Process checkbox values to extract numbers
+                    if (is_array($field_value)) {
+                        $converted_values = [];
+                        foreach ($field_value as $value) {
+                            // Check if value has format "Name | Number"
+                            if (strpos($value, '|') !== false) {
+                                $parts = explode('|', $value);
+                                if (count($parts) === 2) {
+                                    $number = trim($parts[1]);
+                                    if (is_numeric($number)) {
+                                        $converted_values[] = (int)$number;
+                                    }
+                                }
+                            }
+                        }
+
+                        if (!empty($converted_values)) {
+                            $user_data['tools'] = $converted_values;
+
+                            $logger->log_form_submission(
+                                $form_data['id'],
+                                [
+                                    'field_id' => $field_id,
+                                    'original_values' => $field_value,
+                                    'converted_values' => $converted_values
+                                ],
+                                'info',
+                                'Checkbox values converted to tools array'
+                            );
+                        }
+                    }
                     break;
             }
         }
@@ -276,6 +351,33 @@ class WPForms
             $user_data['name'] = implode(' ', $name_parts);
         }
 
+        // Set default values for required API fields as per documentation
+        if (empty($user_data['name'])) {
+            $user_data['name'] = 'New Customer'; // Default name as per documentation
+        }
+
+        if (empty($user_data['description'])) {
+            $user_data['description'] = ''; // Empty description as per documentation
+        }
+
+        if (empty($user_data['notes'])) {
+            $user_data['notes'] = 'new customer'; // Default notes as per documentation
+        }
+
+        // Set default tools array only if no checkbox values were found
+        if (empty($user_data['tools'])) {
+            $user_data['tools'] = []; // Empty array if no checkboxes selected
+        }
+
+        // Set default metering and subscription values as per documentation
+        if (empty($user_data['meteringSeconds'])) {
+            $user_data['meteringSeconds'] = 10000; // Default metering seconds
+        }
+
+        if (empty($user_data['subscriptionTime'])) {
+            $user_data['subscriptionTime'] = '365 days'; // Default subscription time
+        }
+
         // Log essential form data (without sensitive information)
         $logger->log_form_submission(
             $form_data['id'],
@@ -285,10 +387,77 @@ class WPForms
                 'has_name' => !empty($user_data['name']),
                 'has_password' => !empty($user_data['password']),
                 'has_phone' => !empty($user_data['phone']),
-                'has_address' => !empty($user_data['address'])
+                'has_address' => !empty($user_data['address']),
+                'has_description' => !empty($user_data['description']),
+                'has_notes' => !empty($user_data['notes']),
+                'tools_count' => count($user_data['tools']),
+                'tools_values' => $user_data['tools'],
+                'metering_seconds' => $user_data['meteringSeconds'],
+                'subscription_time' => $user_data['subscriptionTime']
             ],
             'info',
-            'Form data extracted successfully'
+            'Form data extracted successfully with API-compliant defaults'
+        );
+
+        return $user_data;
+    }
+
+    /**
+     * Extract signin data from form submission
+     *
+     * @param array $submitted_data Form submission data
+     * @param array $form_data Form configuration
+     * @return array|false User data or false on failure
+     */
+    private function extract_signin_data($submitted_data, $form_data)
+    {
+        $user_data = [];
+        $core = Core::get_instance();
+        $logger = $core->logger;
+
+        // Look for email and password fields
+        foreach ($submitted_data as $field_id => $field) {
+            $field_type = $field['type'];
+            $field_value = $field['value'];
+
+            if (empty($field_value)) {
+                continue;
+            }
+
+            switch ($field_type) {
+                case 'email':
+                    $user_data['email'] = sanitize_email($field_value);
+                    break;
+                case 'password':
+                    $user_data['password'] = $field_value; // Plain password for hashing
+                    break;
+            }
+        }
+
+        // Check if we have required fields
+        if (empty($user_data['email']) || empty($user_data['password'])) {
+            $logger->log_form_submission(
+                $form_data['id'],
+                [
+                    'has_email' => !empty($user_data['email']),
+                    'has_password' => !empty($user_data['password'])
+                ],
+                'error',
+                'Missing required fields for signin'
+            );
+            return false;
+        }
+
+        // Log signin data extraction
+        $logger->log_form_submission(
+            $form_data['id'],
+            [
+                'has_email' => !empty($user_data['email']),
+                'has_password' => !empty($user_data['password']),
+                'email' => $user_data['email']
+            ],
+            'info',
+            'Signin data extracted successfully'
         );
 
         return $user_data;
@@ -453,5 +622,33 @@ class WPForms
             </div>
         </div>
 <?php
+    }
+
+    /**
+     * Process checkbox values and convert them to array of numbers
+     * Note: This method is now deprecated as checkbox processing is handled in extract_user_data
+     *
+     * @param array $fields Form fields data
+     * @param array $entry Entry data
+     * @param array $form_data Form data
+     * @param int $entry_id Entry ID
+     */
+    public function process_checkbox_values($fields, $entry, $form_data, $entry_id)
+    {
+        $core = Core::get_instance();
+        $logger = $core->logger;
+
+        $logger->log_form_submission(
+            $form_data['id'],
+            [
+                'method' => 'process_checkbox_values',
+                'note' => 'Checkbox processing now handled in extract_user_data method'
+            ],
+            'info',
+            'Checkbox processing method called (deprecated)'
+        );
+
+        // Checkbox processing is now handled in extract_user_data method
+        // This method is kept for backward compatibility
     }
 }

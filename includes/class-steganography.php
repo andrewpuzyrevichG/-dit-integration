@@ -372,11 +372,7 @@ class Steganography
         $_SESSION['login_aes_key'] = $base64_key;
         $_SESSION['login_aes_key_time'] = time();
 
-        // Cookie зберігання
-        if ($customer_id) {
-            setcookie('dit_aes_key_' . $customer_id, $stegnokey, time() + 3600, '/');
-        }
-        setcookie('dit_login_aes_key', $base64_key, time() + 3600, '/');
+        // Note: Cookies removed - AES key stored only in session
 
         error_log('DIT Steganography: === KEY SAVING COMPLETE ===');
     }
@@ -417,8 +413,7 @@ class Steganography
         unset($_SESSION['login_aes_key']);
         unset($_SESSION['login_aes_key_time']);
 
-        // Clear from cookies
-        setcookie('dit_login_aes_key', '', time() - 3600, '/');
+        // Note: Cookies removed - no cookies to clear
     }
 
     /**
@@ -479,12 +474,11 @@ class Steganography
                 error_log('DIT Steganography: - Saving LEGACY binary key format (32 bytes)');
                 $_SESSION['dit_aes_keys'][$customer_id] = $binary_key;
 
-                // Also save in cookies with proper format
-                setcookie('dit_aes_key_' . $customer_id, $base64_key, time() + 3600, '/');
+                // Note: Cookies removed - AES key stored only in session
 
                 error_log('DIT Steganography: AES key storage updated for customer_id ' . $customer_id . ', length: ' . strlen($binary_key));
                 error_log('DIT Steganography: - Session storage: dit_aes_keys[' . $customer_id . '] = binary key (' . strlen($binary_key) . ' bytes)');
-                error_log('DIT Steganography: - Cookie storage: dit_aes_key_' . $customer_id . ' = base64 key (' . strlen($base64_key) . ' chars)');
+                error_log('DIT Steganography: - Note: Cookies removed - AES key stored only in session');
 
                 // Verify the saved key
                 $saved_key = $_SESSION['dit_aes_keys'][$customer_id];

@@ -662,16 +662,13 @@ class API
         $_SESSION['login_aes_key_time'] = time();
 
         // Save in cookies for persistence
-        setcookie('dit_aes_key_' . $user_id, base64_encode($aes_key), time() + 3600, '/');
-        setcookie('dit_aes_iv_' . $user_id, base64_encode($iv), time() + 3600, '/');
-        setcookie('dit_login_aes_key', base64_encode($aes_key), time() + 3600, '/');
+        // Note: Cookies removed - AES key and IV stored only in session
 
-        error_log('DIT API: Original AES key saved successfully:');
+        error_log('DIT API: Original AES key saved successfully (session only, no cookies):');
         error_log('DIT API: - Session: dit_aes_keys[' . $user_id . '] = ' . strlen($aes_key) . ' bytes');
         error_log('DIT API: - Session: dit_aes_ivs[' . $user_id . '] = ' . strlen($iv) . ' bytes');
         error_log('DIT API: - Session: login_aes_key = base64 encoded');
-        error_log('DIT API: - Cookies: dit_aes_key_' . $user_id . ' = base64 encoded');
-        error_log('DIT API: - Cookies: dit_aes_iv_' . $user_id . ' = base64 encoded');
+        error_log('DIT API: - Note: Cookies removed - AES key stored only in session');
         error_log('DIT API: === ORIGINAL AES KEY SAVED ===');
     }
 
@@ -1709,99 +1706,21 @@ class API
     }
 
     /**
-     * Begin a new session
-     *
-     * @param int $user_id User ID from login
-     * @param int $license_type 0 for metered, 1 for time-based
-     * @param int $tool_type Tool type (0=VFX, 1=DI, 2=Archive, 3=Production)
-     * @return array|null Session data or null on failure
+     * Begin Session API - REMOVED
+     * 
+     * This API was removed from the login process as it's only needed for tools.
+     * Developer confirmed that BeginSession is not required for basic login functionality.
+     * 
+     * @param int $user_id User ID
+     * @param int $license_type License type (0 = Metered, 1 = Time-based)
+     * @param int $tool_type Tool type (0 = VFX, 1 = DI, 2 = Archive, 3 = Production)
+     * @return array|null Always returns null (API removed)
      */
     public function begin_session(int $user_id, int $license_type, int $tool_type): ?array
     {
-        $core = Core::get_instance();
-        $logger = $core->logger;
-
-        $url = add_query_arg([
-            'UserId' => $user_id,
-            'LicenseType' => $license_type,
-            'ToolType' => $tool_type
-        ], $this->api_base_url . '/Session/BeginSession');
-
-        $logger->log_api_interaction('Begin Session', [
-            'user_id' => $user_id,
-            'license_type' => $license_type,
-            'license_type_name' => $license_type === 0 ? 'Metered' : 'Time-based',
-            'tool_type' => $tool_type,
-            'tool_type_name' => $this->get_tool_type_name($tool_type),
-            'url' => $url,
-            'step' => 'request_start'
-        ], 'info', 'Starting session creation request');
-
-        $response = wp_remote_request($url, [
-            'method' => 'PUT',
-            'timeout' => 30,
-            'sslverify' => true
-        ]);
-
-        if (is_wp_error($response)) {
-            $logger->log_api_interaction('Begin Session', [
-                'user_id' => $user_id,
-                'error' => $response->get_error_message(),
-                'step' => 'wp_error'
-            ], 'error', 'Session creation failed with WordPress error');
-            return null;
-        }
-
-        $response_code = wp_remote_retrieve_response_code($response);
-        $body = wp_remote_retrieve_body($response);
-        $headers = wp_remote_retrieve_headers($response);
-
-        $logger->log_api_interaction('Begin Session', [
-            'user_id' => $user_id,
-            'response_code' => $response_code,
-            'response_body' => $body,
-            'response_headers' => $headers,
-            'body_length' => strlen($body),
-            'step' => 'response_received'
-        ], $response_code === 200 ? 'info' : 'error', 'Session creation response received');
-
-        if ($response_code !== 200) {
-            $logger->log_api_interaction('Begin Session', [
-                'user_id' => $user_id,
-                'response_code' => $response_code,
-                'response_body' => $body,
-                'step' => 'http_error'
-            ], 'error', 'Session creation failed with HTTP ' . $response_code);
-            return null;
-        }
-
-        // Try to decode JSON response
-        $data = json_decode($body, true);
-
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            $logger->log_api_interaction('Begin Session', [
-                'user_id' => $user_id,
-                'response_body' => $body,
-                'json_error' => json_last_error_msg(),
-                'step' => 'json_decode_error'
-            ], 'error', 'Invalid JSON response from BeginSession API');
-            return null;
-        }
-
-        $logger->log_api_interaction('Begin Session', [
-            'user_id' => $user_id,
-            'decoded_data' => $data,
-            'data_type' => gettype($data),
-            'is_array' => is_array($data),
-            'session_id' => $data['SessionId'] ?? null,
-            'remaining_seconds' => $data['RemainingSeconds'] ?? null,
-            'error_code' => $data['Error'] ?? null,
-            'has_session_id' => isset($data['SessionId']),
-            'has_remaining_seconds' => isset($data['RemainingSeconds']),
-            'step' => 'json_decoded'
-        ], 'success', 'Session creation JSON decoded successfully');
-
-        return $data;
+        // BeginSession API removed from login process - only needed for tools
+        // This method is kept for backward compatibility but always returns null
+        return null;
     }
 
     /**
@@ -2064,7 +1983,7 @@ class API
         $iv_hex = bin2hex($iv); // hex-encode the IV as per developer instructions
 
         // Формуємо GET-запит з новим ендпоінтом та параметрами
-        $request_url = $this->api_base_url . '/Users/GetUsersForCustomer?customerId=' . $customer_id . '&AesIVHex=' . $iv_hex;
+        $request_url = $this->api_base_url . '/Users/GetUsersForCustomer?customerId=' . $customer_id . '&hexAesIV=' . $iv_hex;
 
         // Get AES key directly from customer-specific storage (session/cookies/user_meta)
         // This is the correct way based on the new architecture where AES keys are stored per customer_id
@@ -2095,9 +2014,9 @@ class API
             'aes_key_length' => $aes_key ? strlen($aes_key) : 0,
             'iv_hex' => $iv_hex,
             'iv_base64_for_decryption' => base64_encode(hex2bin($iv_hex)),
-            'parameter_name' => 'AesIVHex',
+            'parameter_name' => 'hexAesIV',
             'step' => 'request_start'
-        ], 'info', 'Starting get users for customer request (new endpoint: GetUsersForCustomer with AesIVHex)');
+        ], 'info', 'Starting get users for customer request (new endpoint: GetUsersForCustomer with hexAesIV)');
 
         try {
             $response = wp_remote_get($request_url, [
@@ -3248,13 +3167,52 @@ class API
 
             $register_code = wp_remote_retrieve_response_code($register_response);
             $register_body = wp_remote_retrieve_body($register_response);
+            $register_headers = wp_remote_retrieve_headers($register_response);
+
+            // Детальне логування відповіді сервера API
             $logger->log_api_interaction('Register Customer RSA', [
-                'step' => 'register_response',
+                'step' => 'register_response_received',
                 'response_code' => $register_code,
-                'response_body' => $register_body
-            ], $register_code === 200 ? 'success' : 'error', 'RegisterCustomerRSA response received');
+                'response_body' => $register_body,
+                'response_body_length' => strlen($register_body),
+                'response_headers' => $register_headers,
+                'response_success' => $register_code === 200,
+                'request_url' => $register_url,
+                'request_method' => 'PUT',
+                'encrypted_payload_length' => strlen($encrypted_payload)
+            ], $register_code === 200 ? 'success' : 'error', 'RegisterCustomerRSA response received from server API');
+
+            // Додаткове логування в error_log для детального аналізу
+            error_log('DIT API: === REGISTER CUSTOMER RSA RESPONSE ===');
+            error_log('DIT API: Response Code: ' . $register_code);
+            error_log('DIT API: Response Body: ' . $register_body);
+            error_log('DIT API: Response Body Length: ' . strlen($register_body));
+            error_log('DIT API: Response Headers: ' . print_r($register_headers, true));
+            error_log('DIT API: Request URL: ' . $register_url);
+            error_log('DIT API: Request Method: PUT');
+            error_log('DIT API: Encrypted Payload Length: ' . strlen($encrypted_payload));
+            error_log('DIT API: === END RESPONSE LOG ===');
 
             if ($register_code !== 200) {
+                // Логування помилки з детальною інформацією про відповідь сервера
+                $logger->log_api_interaction('Register Customer RSA', [
+                    'step' => 'registration_failed',
+                    'response_code' => $register_code,
+                    'response_body' => $register_body,
+                    'response_body_length' => strlen($register_body),
+                    'response_headers' => $register_headers,
+                    'request_url' => $register_url,
+                    'request_method' => 'PUT',
+                    'encrypted_payload_length' => strlen($encrypted_payload),
+                    'error_message' => 'HTTP ' . $register_code . ' - ' . $register_body
+                ], 'error', 'Customer registration failed with HTTP ' . $register_code);
+
+                error_log('DIT API: === REGISTER CUSTOMER RSA FAILED ===');
+                error_log('DIT API: HTTP Error Code: ' . $register_code);
+                error_log('DIT API: Error Response Body: ' . $register_body);
+                error_log('DIT API: Request URL: ' . $register_url);
+                error_log('DIT API: === END ERROR LOG ===');
+
                 throw new Exception('Registration failed: HTTP ' . $register_code . ' - ' . $register_body);
             }
 
@@ -3280,23 +3238,44 @@ class API
                 'email' => $user_data['email'] ?? ''
             ];
 
+            // Логування успішної відповіді сервера API
+            $logger->log_api_interaction('Register Customer RSA', [
+                'step' => 'registration_success',
+                'customer_id' => $customer_id,
+                'response_data' => $response_data,
+                'response_data_keys' => array_keys($response_data),
+                'response_body_original' => $register_body,
+                'response_body_length' => strlen($register_body),
+                'response_headers' => $register_headers,
+                'request_url' => $register_url,
+                'request_method' => 'PUT',
+                'encrypted_payload_length' => strlen($encrypted_payload),
+                'user_email' => $user_data['email'] ?? 'not_provided'
+            ], 'success', 'Customer registration successful - response parsed from server API');
+
+            error_log('DIT API: === REGISTER CUSTOMER RSA SUCCESS ===');
+            error_log('DIT API: Customer ID: ' . $customer_id);
+            error_log('DIT API: Response Data: ' . print_r($response_data, true));
+            error_log('DIT API: Response Data Keys: ' . implode(', ', array_keys($response_data)));
+            error_log('DIT API: Original Response Body: ' . $register_body);
+            error_log('DIT API: User Email: ' . ($user_data['email'] ?? 'not_provided'));
+            error_log('DIT API: === END SUCCESS LOG ===');
+
             // Зберігаємо AES-ключ в сесії замість WordPress settings
             if (!isset($_SESSION['dit_aes_keys'])) {
                 $_SESSION['dit_aes_keys'] = [];
             }
             $_SESSION['dit_aes_keys'][$customer_id] = base64_encode($aes_data['key']);
 
-            // Також зберігаємо в cookies для персистентності
-            $cookie_name = 'dit_aes_key_' . $customer_id;
-            setcookie($cookie_name, base64_encode($aes_data['key']), time() + (86400 * 30), '/'); // 30 днів
+            // Note: Cookies removed - AES key stored only in session
 
             $logger->log_api_interaction('Register Customer RSA', [
                 'step' => 'aes_key_saved_to_session',
                 'customer_id' => $customer_id,
                 'aes_key_saved' => true,
                 'session_keys_count' => count($_SESSION['dit_aes_keys']),
-                'cookie_set' => true
-            ], 'info', 'AES key saved to session and cookies');
+                'cookie_set' => false
+            ], 'info', 'AES key saved to session only (cookies removed)');
 
             $logger->log_api_interaction('Register Customer RSA', [
                 'customer_id' => $customer_id,
@@ -3417,18 +3396,65 @@ class API
 
             $response_code = wp_remote_retrieve_response_code($response);
             $response_body = wp_remote_retrieve_body($response);
+            $response_headers = wp_remote_retrieve_headers($response);
 
+            // Детальне логування відповіді сервера API при реєстрації User
             $logger->log_api_interaction('Register User RSA', [
+                'step' => 'user_registration_response_received',
                 'response_code' => $response_code,
                 'response_body' => $response_body,
-                'request_url_sent' => $request_url,
-                'request_method_sent' => 'PUT',
-                'encrypted_sent' => $encrypted_payload,
-                'request_body_sent' => $request_body,
-                'request_body_length' => strlen($request_body)
-            ], $response_code === 200 ? 'success' : 'error', 'User registration response received (RSA).');
+                'response_body_length' => strlen($response_body),
+                'response_headers' => $response_headers,
+                'response_success' => $response_code === 200,
+                'request_url' => $request_url,
+                'request_method' => 'PUT',
+                'encrypted_payload' => $encrypted_payload,
+                'encrypted_payload_length' => strlen($encrypted_payload),
+                'request_body' => $request_body,
+                'request_body_length' => strlen($request_body),
+                'customer_id' => $customer_id,
+                'user_email' => $user_data['email'] ?? 'not_provided'
+            ], $response_code === 200 ? 'success' : 'error', 'User registration response received from server API (RSA)');
+
+            // Додаткове логування в error_log для детального аналізу
+            error_log('DIT API: === REGISTER USER RSA RESPONSE ===');
+            error_log('DIT API: Response Code: ' . $response_code);
+            error_log('DIT API: Response Body: ' . $response_body);
+            error_log('DIT API: Response Body Length: ' . strlen($response_body));
+            error_log('DIT API: Response Headers: ' . print_r($response_headers, true));
+            error_log('DIT API: Request URL: ' . $request_url);
+            error_log('DIT API: Request Method: PUT');
+            error_log('DIT API: Encrypted Payload Length: ' . strlen($encrypted_payload));
+            error_log('DIT API: Request Body Length: ' . strlen($request_body));
+            error_log('DIT API: Customer ID: ' . $customer_id);
+            error_log('DIT API: User Email: ' . ($user_data['email'] ?? 'not_provided'));
+            error_log('DIT API: === END RESPONSE LOG ===');
 
             if ($response_code !== 200) {
+                // Логування помилки з детальною інформацією про відповідь сервера
+                $logger->log_api_interaction('Register User RSA', [
+                    'step' => 'user_registration_failed',
+                    'response_code' => $response_code,
+                    'response_body' => $response_body,
+                    'response_body_length' => strlen($response_body),
+                    'response_headers' => $response_headers,
+                    'request_url' => $request_url,
+                    'request_method' => 'PUT',
+                    'encrypted_payload_length' => strlen($encrypted_payload),
+                    'request_body_length' => strlen($request_body),
+                    'customer_id' => $customer_id,
+                    'user_email' => $user_data['email'] ?? 'not_provided',
+                    'error_message' => 'HTTP ' . $response_code . ' - ' . $response_body
+                ], 'error', 'User registration failed with HTTP ' . $response_code);
+
+                error_log('DIT API: === REGISTER USER RSA FAILED ===');
+                error_log('DIT API: HTTP Error Code: ' . $response_code);
+                error_log('DIT API: Error Response Body: ' . $response_body);
+                error_log('DIT API: Request URL: ' . $request_url);
+                error_log('DIT API: Customer ID: ' . $customer_id);
+                error_log('DIT API: User Email: ' . ($user_data['email'] ?? 'not_provided'));
+                error_log('DIT API: === END ERROR LOG ===');
+
                 throw new \Exception('User registration failed: HTTP ' . $response_code . ' - ' . $response_body);
             }
 
@@ -3449,12 +3475,32 @@ class API
             }
 
             $user_id = (int) $response_data['UserId'];
+
+            // Логування успішної відповіді сервера API
             $logger->log_api_interaction('Register User RSA', [
+                'step' => 'user_registration_success',
                 'user_id' => $user_id,
                 'customer_id' => $customer_id,
                 'email' => $user_data['email'] ?? '',
-                'step' => 'success'
-            ], 'success', 'User registered successfully (RSA)');
+                'response_data' => $response_data,
+                'response_data_keys' => array_keys($response_data),
+                'response_body_original' => $response_body,
+                'response_body_length' => strlen($response_body),
+                'response_headers' => $response_headers,
+                'request_url' => $request_url,
+                'request_method' => 'PUT',
+                'encrypted_payload_length' => strlen($encrypted_payload),
+                'request_body_length' => strlen($request_body)
+            ], 'success', 'User registered successfully - response parsed from server API (RSA)');
+
+            error_log('DIT API: === REGISTER USER RSA SUCCESS ===');
+            error_log('DIT API: User ID: ' . $user_id);
+            error_log('DIT API: Customer ID: ' . $customer_id);
+            error_log('DIT API: Response Data: ' . print_r($response_data, true));
+            error_log('DIT API: Response Data Keys: ' . implode(', ', array_keys($response_data)));
+            error_log('DIT API: Original Response Body: ' . $response_body);
+            error_log('DIT API: User Email: ' . ($user_data['email'] ?? 'not_provided'));
+            error_log('DIT API: === END SUCCESS LOG ===');
 
             return $user_id;
         } catch (\Exception $e) {

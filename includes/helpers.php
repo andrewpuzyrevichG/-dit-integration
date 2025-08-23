@@ -186,9 +186,9 @@ function save_user_data($user_name, $customer_id, $permanent_aes_key, $additiona
         $result = update_option('dit_settings', $settings);
         log_message("[save_user_data] update_option result: " . var_export($result, true), 'info');
 
-        // Save AES key to user's browser cookie (per customer_id)
-        $cookie_result = save_customer_data_to_cookies($customer_id, $permanent_aes_key, 365); // 1 year
-        log_message("[save_user_data] save_customer_data_to_cookies result: " . var_export($cookie_result, true), 'info');
+        // Note: Cookies removed - AES key stored only in session
+        $cookie_result = true; // Simulate success for backward compatibility
+        log_message("[save_user_data] Cookies removed - AES key stored only in session", 'info');
 
         // Save AES key to session (per customer_id)
         if (!isset($_SESSION)) {
@@ -468,19 +468,9 @@ function save_customer_data_to_cookies($customer_id, $aes_key, $expiry_days = 36
             'samesite' => 'Strict' // CSRF protection
         ];
 
-        // Save customer ID
-        setcookie('dit_customer_id', $customer_id, $cookie_options);
-
-        // Save AES key per customer_id
-        setcookie('dit_aes_key_' . $customer_id, base64_encode($aes_key), $cookie_options);
-
-        if (setcookie('dit_customer_id', $customer_id, $cookie_options) && setcookie('dit_aes_key_' . $customer_id, base64_encode($aes_key), $cookie_options)) {
-            log_message("Customer ID and AES key saved to cookies for customer ID: {$customer_id}", 'info');
-            return true;
-        } else {
-            log_message("Failed to save customer data to cookies for customer ID: {$customer_id}", 'error');
-            return false;
-        }
+        // Note: Cookies removed - customer data stored only in session
+        log_message("Customer data stored only in session for customer ID: {$customer_id} (cookies removed)", 'info');
+        return true;
     } catch (\Exception $e) {
         log_message("Error saving customer data to cookies: " . $e->getMessage(), 'error');
         return false;
@@ -614,19 +604,9 @@ function delete_customer_data_from_cookies()
             'samesite' => 'Strict'
         ];
 
-        // Delete customer ID cookie
-        $customer_id_result = setcookie('dit_customer_id', '', $cookie_options);
-
-        // Delete AES key cookie
-        $aes_key_result = setcookie('dit_aes_key', '', $cookie_options);
-
-        if ($customer_id_result && $aes_key_result) {
-            log_message("Customer data deleted from cookies", 'info');
-            return true;
-        } else {
-            log_message("Failed to delete customer data from cookies", 'error');
-            return false;
-        }
+        // Note: Cookies removed - no cookies to delete
+        log_message("No cookies to delete - customer data stored only in session", 'info');
+        return true;
     } catch (\Exception $e) {
         log_message("Error deleting customer data from cookies: " . $e->getMessage(), 'error');
         return false;

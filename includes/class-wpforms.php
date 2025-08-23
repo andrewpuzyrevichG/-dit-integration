@@ -951,9 +951,26 @@ class WPForms
                     'API validation successful - proceeding to database sync'
                 );
 
-                // Step 4: Note about AES key storage
-                // For WebLogin API, AES keys are handled internally by the API method
-                // No additional AES key storage updates needed
+                // Step 4: Update AES key storage with customer_id for compatibility
+                // ВАЖЛИВО: Це має бути викликано ТІЛЬКИ для legacy RSA реєстрацій, НЕ для нових стеганографічних логінів
+                if ($user_id && $steganography_data) {
+                    $logger->log_form_submission(
+                        $form_data['id'],
+                        [
+                            'form_type' => $form_type,
+                            'step' => 'aes_key_update_skipped',
+                            'user_id' => $user_id,
+                            'role_id' => $selected_role,
+                            'steganography_available' => !empty($steganography_data),
+                            'note' => 'Skipping AES key update - new steganography login, no legacy conversion needed'
+                        ],
+                        'info',
+                        'Skipping AES key storage update for customer_id: ' . $user_id . ' (new steganography login)'
+                    );
+
+                    // НЕ викликаємо update_aes_key_storage для нових стеганографічних логінів
+                    // Це запобігає перезапису стеганографічного ключа legacy ключем
+                }
 
 
 
@@ -983,11 +1000,12 @@ class WPForms
                             ]
                         ],
                         'info',
-                        'Starting session creation'
+                        'BeginSession API removed - proceeding to Session Manager initialization'
                     );
 
-                    // Begin session
-                    $session_result = $api->begin_session($user_id, $license_type, $tool_type);
+                    // BeginSession API removed - only needed for tools
+                    // Session creation is now handled by Session Manager directly
+                    $session_result = null;
 
                     $logger->log_form_submission(
                         $form_data['id'],
@@ -998,16 +1016,17 @@ class WPForms
                             'user_id' => $user_id,
                             'role_id' => $selected_role,
                             'session_result' => $session_result,
-                            'session_success' => $session_result !== null,
-                            'has_session_id' => isset($session_result['SessionId']),
-                            'session_id' => $session_result['SessionId'] ?? null,
-                            'remaining_seconds' => $session_result['RemainingSeconds'] ?? null,
-                            'session_error' => $session_result['Error'] ?? null,
-                            'session_result_keys' => $session_result ? array_keys($session_result) : [],
-                            'full_session_response' => $session_result
+                            'session_success' => true, // Always true since API removed
+                            'has_session_id' => false, // No session ID from API
+                            'session_id' => null,
+                            'remaining_seconds' => null,
+                            'session_error' => null,
+                            'session_result_keys' => [],
+                            'full_session_response' => null,
+                            'note' => 'BeginSession API removed - session creation handled by Session Manager'
                         ],
-                        $session_result !== null ? 'info' : 'warning',
-                        $session_result !== null ? 'Session creation completed' : 'Session creation failed'
+                        'info',
+                        'BeginSession API removed - proceeding to Session Manager initialization'
                     );
 
                     // Initialize session with Session Manager
@@ -1040,11 +1059,12 @@ class WPForms
                                 'email' => $user_data['email'],
                                 'user_id' => $user_id,
                                 'role_id' => $selected_role,
-                                'session_id' => $session_result['SessionId'] ?? null,
-                                'remaining_seconds' => $session_result['RemainingSeconds'] ?? null,
+                                'session_id' => null, // No session ID from BeginSession API
+                                'remaining_seconds' => null, // No remaining seconds from BeginSession API
                                 'user_role' => $session_manager->get_user_role(),
                                 'session_data_stored' => true,
-                                'login_complete' => true
+                                'login_complete' => true,
+                                'note' => 'BeginSession API removed - session data managed by Session Manager'
                             ],
                             'success',
                             'Login and session initialization successful - redirecting to dashboard'

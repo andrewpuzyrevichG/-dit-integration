@@ -490,9 +490,7 @@ class Session_Manager
             // Log key details after storing in session_data
             error_log('DIT Session Manager: - Session data aes_key length: ' . strlen($this->session_data['aes_key']) . ' chars');
 
-            // Store in cookies for persistence
-            $cookie_name = 'dit_aes_key_' . $customer_id;
-            setcookie($cookie_name, $key, time() + (86400 * 30), '/'); // 30 днів
+            // Note: Cookies removed - AES key stored only in session
 
             error_log('DIT Session Manager: AES key stored successfully for customer ' . $customer_id);
             return true;
@@ -598,9 +596,7 @@ class Session_Manager
             // Also clear from session data array
             $this->session_data['aes_key'] = null;
 
-            // Clear from cookies
-            $cookie_name = 'dit_aes_key_' . $customer_id;
-            setcookie($cookie_name, '', time() - 3600, '/');
+            // Note: Cookies removed - no cookies to clear
 
             error_log('DIT Session Manager: AES key cleared successfully for customer ' . $customer_id);
             return true;
@@ -651,26 +647,8 @@ class Session_Manager
      */
     private function store_in_secure_cookies(): void
     {
-        // Store user ID and role in secure cookies
-        if ($this->session_data['user_id']) {
-            setcookie('dit_user_id', $this->session_data['user_id'], [
-                'expires' => time() + (365 * 24 * 60 * 60), // 1 year
-                'path' => '/',
-                'secure' => true,
-                'httponly' => true,
-                'samesite' => 'Strict'
-            ]);
-        }
-
-        if ($this->session_data['role']) {
-            setcookie('dit_user_role', $this->session_data['role'], [
-                'expires' => time() + (365 * 24 * 60 * 60), // 1 year
-                'path' => '/',
-                'secure' => true,
-                'httponly' => true,
-                'samesite' => 'Strict'
-            ]);
-        }
+        // Note: Cookies removed - user data stored only in session
+        // This method is kept for backward compatibility but no longer sets cookies
     }
 
     /**
@@ -998,11 +976,7 @@ class Session_Manager
             unset($_SESSION['dit_user_session']);
             session_destroy();
 
-            // Clear secure cookies
-            setcookie('dit_user_id', '', time() - 3600, '/');
-            setcookie('dit_user_role', '', time() - 3600, '/');
-            setcookie('dit_aes_key', '', time() - 3600, '/');
-            setcookie('dit_customer_id', '', time() - 3600, '/');
+            // Note: Cookies removed - no cookies to clear
 
             // Clear WordPress user meta
             if ($email !== 'unknown') {

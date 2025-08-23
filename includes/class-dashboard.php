@@ -960,9 +960,25 @@ class Dashboard
             $sync_result = $this->sync_users_from_api($api, $api_customer_id);
             error_log('DIT Dashboard: API sync result: ' . ($sync_result ? 'success' : 'failed'));
 
-            // Note: Database functionality has been removed
-            error_log('DIT Dashboard: Database functionality removed - returning empty user list');
-            wp_send_json_success([]);
+            // Get synchronized users from session
+            $users = [];
+            if (isset($_SESSION['dit_users_' . $api_customer_id])) {
+                $users = $_SESSION['dit_users_' . $api_customer_id];
+                $sync_time = $_SESSION['dit_users_sync_time_' . $api_customer_id] ?? 0;
+
+                error_log('DIT Dashboard: Found ' . count($users) . ' synchronized users for customer ' . $api_customer_id);
+                error_log('DIT Dashboard: Users synced at: ' . date('Y-m-d H:i:s', $sync_time));
+
+                // Log user details for debugging
+                foreach ($users as $index => $user) {
+                    error_log('DIT Dashboard: - User ' . ($index + 1) . ': ' . json_encode($user));
+                }
+            } else {
+                error_log('DIT Dashboard: No synchronized users found in session for customer ' . $api_customer_id);
+            }
+
+            // Return synchronized users or empty array if none found
+            wp_send_json_success($users);
 
             error_log('DIT Dashboard: JSON response sent successfully');
         } catch (\Exception $e) {
@@ -982,31 +998,80 @@ class Dashboard
         error_log('DIT Dashboard: Starting sync_users_from_api for customer_id: ' . $customer_id);
 
         try {
-            // Check if steganography key already exists and is valid
+            // Check if session exists
             if (!isset($_SESSION)) {
                 session_start();
             }
 
-            $needs_steganography_key = true;
+            // Check if we have a valid AES key (either original 32-byte or steganography 128-char)
+            $has_valid_key = false;
+            $key_type = 'none';
+
             if (isset($_SESSION['dit_aes_keys'][$customer_id])) {
                 $existing_key = $_SESSION['dit_aes_keys'][$customer_id];
-                $is_steganography_key = (ctype_xdigit($existing_key) && strlen($existing_key) === 128);
 
                 error_log('DIT Dashboard: - Existing key found, length: ' . strlen($existing_key));
-                error_log('DIT Dashboard: - Is steganography format: ' . ($is_steganography_key ? 'YES' : 'NO'));
 
-                if ($is_steganography_key) {
-                    error_log('DIT Dashboard: Valid steganography key already exists, skipping creation');
-                    $needs_steganography_key = false;
+                // Check if it's a 32-byte original AES key
+                if (strlen($existing_key) === 32) {
+                    $has_valid_key = true;
+                    $key_type = 'original_aes_32_bytes';
+                    error_log('DIT Dashboard: - Found original AES key (32 bytes) - VALID');
                 }
+                // Check if it's a 128-char steganography key
+                elseif (ctype_xdigit($existing_key) && strlen($existing_key) === 128) {
+                    $has_valid_key = true;
+                    $key_type = 'steganography_128_chars';
+                    error_log('DIT Dashboard: - Found steganography key (128 chars) - VALID');
+                }
+                // Check if it's a 44-char base64 encoded key
+                elseif (strlen($existing_key) === 44) {
+                    $decoded_key = base64_decode($existing_key, true);
+                    if ($decoded_key !== false && strlen($decoded_key) === 32) {
+                        $has_valid_key = true;
+                        $key_type = 'base64_encoded_32_bytes';
+                        error_log('DIT Dashboard: - Found base64 encoded AES key (44 chars) - VALID');
+                    }
+                }
+
+                error_log('DIT Dashboard: - Key type: ' . $key_type);
             }
 
-            // IMPORTANT: We do NOT create users during login
-            // Users should only be created during registration process
-            // If steganography key is missing, it means the user was not properly registered
-            if ($needs_steganography_key) {
-                error_log('DIT Dashboard: ERROR - Steganography key missing during login');
-                error_log('DIT Dashboard: This indicates the user was not properly registered');
+            // If we have a valid key, proceed with API sync
+            if ($has_valid_key) {
+                error_log('DIT Dashboard: Valid key found, proceeding with GetUsersForCustomer API call');
+
+                try {
+                    // Call GetUsersForCustomer API to sync users
+                    $users = $api->get_users_for_customer($customer_id);
+
+                    if ($users && is_array($users)) {
+                        error_log('DIT Dashboard: GetUsersForCustomer API successful - received ' . count($users) . ' users');
+
+                        // Store users in session for local access
+                        $_SESSION['dit_users_' . $customer_id] = $users;
+                        $_SESSION['dit_users_sync_time_' . $customer_id] = time();
+
+                        error_log('DIT Dashboard: Users stored in session for customer ' . $customer_id);
+
+                        // Log user details for debugging
+                        foreach ($users as $index => $user) {
+                            error_log('DIT Dashboard: - User ' . ($index + 1) . ': ' . json_encode($user));
+                        }
+                    } else {
+                        error_log('DIT Dashboard: GetUsersForCustomer API returned no users or invalid response');
+                        error_log('DIT Dashboard: API response: ' . json_encode($users));
+                    }
+                } catch (\Exception $api_exception) {
+                    error_log('DIT Dashboard: GetUsersForCustomer API call failed: ' . $api_exception->getMessage());
+                    error_log('DIT Dashboard: API exception trace: ' . $api_exception->getTraceAsString());
+
+                    // Don't fail the entire sync if API call fails
+                    // Continue with local data if available
+                }
+            } else {
+                error_log('DIT Dashboard: WARNING - No valid AES key found for customer ' . $customer_id);
+                error_log('DIT Dashboard: This indicates the user was not properly registered or key is missing');
                 error_log('DIT Dashboard: Customer ID: ' . $customer_id . ' needs to be registered first');
                 error_log('DIT Dashboard: Login process cannot continue without proper registration');
             }
@@ -1803,14 +1868,11 @@ class Dashboard
                     }
                 }
 
-                // IMPORTANT: We do NOT create users during login
-                // Users should only be created during registration process
-                // If steganography key is missing, it means the user was not properly registered
+                // REMOVED: Automatic steganography key creation during login
+                // This should only happen during registration, not login
                 if ($needs_steganography_key) {
-                    error_log('DIT Dashboard: ERROR - Steganography key missing during login in get_customer_data');
-                    error_log('DIT Dashboard: This indicates the user was not properly registered');
-                    error_log('DIT Dashboard: Customer ID: ' . $customer_id . ' needs to be registered first');
-                    error_log('DIT Dashboard: Login process cannot continue without proper registration');
+                    error_log('DIT Dashboard: WARNING - Steganography key needed but not created automatically during login in get_customer_data');
+                    error_log('DIT Dashboard: Customer should have been registered first with proper steganography key');
                 }
             } catch (\Exception $e) {
                 error_log('DIT Dashboard: Exception ensuring steganography key in get_customer_data: ' . $e->getMessage());

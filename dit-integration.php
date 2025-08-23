@@ -4,7 +4,7 @@
  * Plugin Name: DIT Integration
  * Plugin URI: https://dataintegritytool.com
  * Description: Integration with Data Integrity Tool API, WPForms and Stripe
- * Version: 1.0.1
+ * Version: 1.2.0
  * Author: Data Integrity Tool
  * Author URI: https://dataintegritytool.com
  * Text Domain: dit-integration
@@ -22,7 +22,7 @@ if (!defined('ABSPATH')) {
 define('DIT_PLUGIN_FILE', __FILE__);
 define('DIT_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('DIT_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('DIT_PLUGIN_VERSION', '1.0.1');
+define('DIT_PLUGIN_VERSION', '1.2.0');
 
 // Global flag to prevent multiple initializations
 global $dit_plugin_initialized;
@@ -64,8 +64,8 @@ spl_autoload_register(function ($class) {
 
     // Build possible file paths
     $paths = [
-        DIT_PLUGIN_DIR . 'includes/' . $file_name,
-        DIT_PLUGIN_DIR . 'admin/' . $file_name
+        DIT_PLUGIN_DIR . 'admin/' . $file_name,
+        DIT_PLUGIN_DIR . 'includes/' . $file_name
     ];
 
     // Debug logging (only in debug mode)
@@ -73,6 +73,7 @@ spl_autoload_register(function ($class) {
         error_log('DIT Integration: Autoloader trying to load class: ' . $class);
         error_log('DIT Integration: Looking for file: ' . $file_name);
         error_log('DIT Integration: DIT_PLUGIN_DIR: ' . DIT_PLUGIN_DIR);
+        error_log('DIT Integration: Search order: admin/ first, then includes/');
     }
 
     // Check each path and include the file if it exists
@@ -97,11 +98,11 @@ spl_autoload_register(function ($class) {
                 require_once $file_path;
 
                 if (defined('WP_DEBUG') && WP_DEBUG) {
-                    error_log('DIT Integration: File included successfully');
+                    error_log('DIT Integration: File included successfully from: ' . $file_path);
                     if (class_exists($class)) {
-                        error_log('DIT Integration: Class ' . $class . ' loaded successfully');
+                        error_log('DIT Integration: Class ' . $class . ' loaded successfully from: ' . $file_path);
                     } else {
-                        error_log('DIT Integration: WARNING - Class ' . $class . ' not found after including file');
+                        error_log('DIT Integration: WARNING - Class ' . $class . ' not found after including file: ' . $file_path);
                     }
                 }
             } catch (Exception $e) {
@@ -124,7 +125,6 @@ $class_files = [
     'includes/class-core.php',
     'includes/class-logger.php',
     'includes/class-api.php',
-    'includes/class-encryption.php',
     'includes/class-wpforms.php'
 ];
 
@@ -139,25 +139,16 @@ foreach ($class_files as $file) {
 
 // Manually load critical classes to ensure they are available
 try {
-    if (!class_exists('DIT\\API')) {
-        $api_file = DIT_PLUGIN_DIR . 'includes/class-api.php';
-        if (file_exists($api_file)) {
-            require_once $api_file;
-            error_log('DIT Integration: API class loaded manually');
-        } else {
-            error_log('DIT Integration: ERROR - API file not found for manual load: ' . $api_file);
-        }
+    // Always load API class manually to ensure it's available
+    $api_file = DIT_PLUGIN_DIR . 'includes/class-api.php';
+    if (file_exists($api_file)) {
+        require_once $api_file;
+        error_log('DIT Integration: API class loaded manually');
+    } else {
+        error_log('DIT Integration: ERROR - API file not found for manual load: ' . $api_file);
     }
 
-    if (!class_exists('DIT\\Encryption')) {
-        $encryption_file = DIT_PLUGIN_DIR . 'includes/class-encryption.php';
-        if (file_exists($encryption_file)) {
-            require_once $encryption_file;
-            error_log('DIT Integration: Encryption class loaded manually');
-        } else {
-            error_log('DIT Integration: ERROR - Encryption file not found for manual load: ' . $encryption_file);
-        }
-    }
+
 
     if (!class_exists('DIT\\WPForms')) {
         $wpforms_file = DIT_PLUGIN_DIR . 'includes/class-wpforms.php';
@@ -284,13 +275,25 @@ function activate_dit()
         wp_die(__('DIT Integration requires WPForms plugin to be installed and activated.', 'dit-integration'));
     }
 
-    // Create necessary database tables
+    // Note: Database functionality has been removed
+    error_log('DIT Integration: Database functionality removed - using WordPress standard tables only');
+
     // Set default options
     add_option('dit_settings', [
         'dit_api_key' => '',
-        'dit_api_url' => '',
-        'encryption_key' => wp_generate_password(32, true, true)
+        'dit_api_url' => ''
     ]);
+
+    // Create reset password page
+    if (class_exists('DIT\\Page_Creator')) {
+        \DIT\Page_Creator::create_reset_password_page();
+    }
+
+    // Register custom page templates
+    add_filter('theme_page_templates', array('DIT\\Page_Creator', 'register_page_templates'));
+
+    // Flush rewrite rules to register dashboard pages
+    flush_rewrite_rules();
 }
 
 /**
@@ -298,17 +301,59 @@ function activate_dit()
  */
 function deactivate_dit()
 {
-    // Cleanup if necessary
+    // Note: Database functionality has been removed
+    error_log('DIT Integration: Database functionality removed - no tables to drop');
+
+    // Flush rewrite rules
+    flush_rewrite_rules();
 }
 
 register_activation_hook(__FILE__, 'activate_dit');
 register_deactivation_hook(__FILE__, 'deactivate_dit');
+
+// Load custom page templates
+add_filter('template_include', 'dit_load_custom_template');
 
 // Initialize the plugin
 add_action('plugins_loaded', 'run_dit', 20);
 
 // Additional hook for admin initialization
 add_action('admin_init', 'run_dit', 10);
+
+// Initialize PHP sessions early
+add_action('init', 'dit_init_sessions', 1);
+
+/**
+ * Initialize PHP sessions for DIT plugin
+ */
+function dit_init_sessions()
+{
+    if (!session_id()) {
+        session_start();
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            error_log('DIT Integration: PHP sessions initialized');
+        }
+    }
+}
+
+/**
+ * Load custom page templates
+ */
+function dit_load_custom_template($template)
+{
+    if (is_page()) {
+        $page_template = get_post_meta(get_the_ID(), '_wp_page_template', true);
+
+        if ($page_template === 'reset-password.php') {
+            $custom_template = DIT_PLUGIN_DIR . 'templates/' . $page_template;
+            if (file_exists($custom_template)) {
+                return $custom_template;
+            }
+        }
+    }
+
+    return $template;
+}
 
 /**
  * Initialize the plugin
@@ -366,4 +411,41 @@ function run_dit()
     } else {
         error_log('DIT Integration: Core class not found');
     }
+
+    // Initialize AJAX handlers
+    if (class_exists('DIT\\AJAX_Handlers')) {
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            error_log('DIT Integration: Initializing AJAX handlers');
+        }
+        new \DIT\AJAX_Handlers();
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            error_log('DIT Integration: AJAX handlers initialized');
+        }
+    } else {
+        error_log('DIT Integration: AJAX_Handlers class not found');
+    }
+}
+
+// Heartbeat AJAX handler for session keep-alive
+add_action('wp_ajax_dit_session_heartbeat', 'dit_session_heartbeat_handler');
+add_action('wp_ajax_nopriv_dit_session_heartbeat', 'dit_session_heartbeat_handler');
+
+function dit_session_heartbeat_handler()
+{
+    error_log('DIT Integration: dit_session_heartbeat_handler called');
+
+    if (!session_id()) {
+        session_start();
+        error_log('DIT Integration: Session started in heartbeat handler');
+    }
+
+    if (isset($_SESSION['dit_user_session'])) {
+        $_SESSION['dit_user_session']['last_activity'] = time();
+        error_log('DIT Integration: Session activity updated to ' . time());
+        wp_send_json_success(['status' => 'ok', 'updated' => true]);
+    } else {
+        error_log('DIT Integration: No dit_user_session found in heartbeat handler');
+        wp_send_json_success(['status' => 'no_session', 'updated' => false]);
+    }
+    wp_die();
 }

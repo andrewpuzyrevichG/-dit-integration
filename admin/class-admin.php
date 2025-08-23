@@ -19,9 +19,12 @@ class Admin
     public function init()
     {
         error_log('DIT Integration: Admin class init started');
+        error_log('DIT Integration: Admin init - Current user ID: ' . get_current_user_id());
+        error_log('DIT Integration: Admin init - Is admin: ' . (is_admin() ? 'Yes' : 'No'));
 
         // Add admin menu with higher priority
         add_action('admin_menu', [$this, 'add_admin_menu'], 20);
+        error_log('DIT Integration: Admin init - admin_menu action added with priority 20');
         add_action('admin_init', [$this, 'register_settings']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_scripts']);
 
@@ -37,10 +40,8 @@ class Admin
         // Handle log downloads
         add_action('admin_init', [$this, 'handle_log_download']);
 
-        // Add additional hook for menu creation
-        add_action('init', [$this, 'add_admin_menu'], 20);
-
         error_log('DIT Integration: Admin class init completed');
+        error_log('DIT Integration: Admin init - All actions registered successfully');
     }
 
     /**
@@ -48,7 +49,10 @@ class Admin
      */
     public function add_admin_menu()
     {
-        error_log('DIT Integration: Adding admin menu');
+        error_log('DIT Integration: Adding admin menu - START');
+        error_log('DIT Integration: Current user ID: ' . get_current_user_id());
+        error_log('DIT Integration: Is admin: ' . (is_admin() ? 'Yes' : 'No'));
+        error_log('DIT Integration: Can manage options: ' . (current_user_can('manage_options') ? 'Yes' : 'No'));
 
         // Check if we're in admin area
         if (!is_admin()) {
@@ -85,7 +89,65 @@ class Admin
         );
         error_log('DIT Integration: Logs submenu page added: ' . $logs_page);
 
+        // Add login debug test submenu page
+        $debug_page = add_submenu_page(
+            'dit-integration',
+            __('Login Debug Test', 'dit-integration'),
+            __('Login Debug', 'dit-integration'),
+            'manage_options',
+            'dit-integration-login-debug',
+            [$this, 'render_login_debug_page']
+        );
+        error_log('DIT Integration: Login debug submenu page added: ' . $debug_page);
+
+        // Add direct admin login submenu page
+        $admin_login_page = add_submenu_page(
+            'dit-integration',
+            __('Direct Admin Login', 'dit-integration'),
+            __('Admin Login', 'dit-integration'),
+            'manage_options',
+            'dit-integration-admin-login',
+            [$this, 'render_direct_admin_login_page']
+        );
+        error_log('DIT Integration: Direct admin login submenu page added: ' . $admin_login_page);
+
+
+
+        // Add test admin auto login submenu page
+        $test_admin_auto_login_page = add_submenu_page(
+            'dit-integration',
+            __('Test Admin Auto Login', 'dit-integration'),
+            __('Auto Login', 'dit-integration'),
+            'manage_options',
+            'dit-integration-test-admin-auto-login',
+            [$this, 'render_test_admin_auto_login_page']
+        );
+        error_log('DIT Integration: Test admin auto login submenu page added: ' . $test_admin_auto_login_page);
+
+        // Add test admin session check submenu page
+        $test_admin_session_check_page = add_submenu_page(
+            'dit-integration',
+            __('Test Admin Session Check', 'dit-integration'),
+            __('Session Check', 'dit-integration'),
+            'manage_options',
+            'dit-integration-test-admin-session-check',
+            [$this, 'render_test_admin_session_check_page']
+        );
+        error_log('DIT Integration: Test admin session check submenu page added: ' . $test_admin_session_check_page);
+
         error_log('DIT Integration: Admin menu added successfully');
+        error_log('DIT Integration: Adding admin menu - END');
+
+        // Debug: Check if menu was actually added
+        global $submenu;
+        if (isset($submenu['dit-integration'])) {
+            error_log('DIT Integration: Submenu items count: ' . count($submenu['dit-integration']));
+            foreach ($submenu['dit-integration'] as $item) {
+                error_log('DIT Integration: Menu item: ' . $item[0] . ' -> ' . $item[2]);
+            }
+        } else {
+            error_log('DIT Integration: WARNING - dit-integration submenu not found in global $submenu');
+        }
     }
 
     /**
@@ -146,6 +208,14 @@ class Admin
             'debug_logging',
             __('Debug Logging', 'dit-integration'),
             [$this, 'render_debug_logging_field'],
+            'dit-integration',
+            'dit_general'
+        );
+
+        add_settings_field(
+            'login_page_id',
+            __('Login/Registration Page', 'dit-integration'),
+            [$this, 'render_login_page_field'],
             'dit-integration',
             'dit_general'
         );
@@ -255,6 +325,27 @@ class Admin
         // Check user capabilities
         if (!current_user_can('manage_options')) {
             return;
+        }
+
+        // Handle troubleshooting actions
+        $action = isset($_GET['action']) ? sanitize_text_field($_GET['action']) : '';
+
+        switch ($action) {
+            case 'fix-dashboard':
+                include DIT_PLUGIN_DIR . 'fix-dashboard-redirect.php';
+                return;
+
+            case 'test-login':
+                include DIT_PLUGIN_DIR . 'test-login-redirect.php';
+                return;
+
+            case 'set-dashboard':
+                $this->handle_set_dashboard();
+                return;
+
+            case 'migrate-dashboard':
+                include DIT_PLUGIN_DIR . 'migrate-dashboard-settings.php';
+                return;
         }
 
         // Get settings
@@ -386,6 +477,31 @@ class Admin
     }
 
     /**
+     * Render login/registration page field
+     */
+    public function render_login_page_field()
+    {
+        $options = get_option('dit_settings', []);
+        $selected = isset($options['login_page_id']) ? (int)$options['login_page_id'] : 0;
+        $pages = get_pages(['sort_column' => 'post_title', 'sort_order' => 'asc']);
+        echo '<select name="dit_settings[login_page_id]" id="login_page_id">';
+        echo '<option value="0">' . esc_html__('— Select —', 'dit-integration') . '</option>';
+        foreach ($pages as $page) {
+            printf(
+                '<option value="%d"%s>%s</option>',
+                $page->ID,
+                selected($selected, $page->ID, false),
+                esc_html($page->post_title)
+            );
+        }
+        echo '</select>';
+        if ($selected) {
+            echo '<p><a href="' . get_permalink($selected) . '" target="_blank">' . esc_html__('View page', 'dit-integration') . '</a></p>';
+        }
+        echo '<p class="description">' . esc_html__('Select the page with your custom login/registration form (API-based).', 'dit-integration') . '</p>';
+    }
+
+    /**
      * Get available forms
      *
      * @return array
@@ -400,6 +516,35 @@ class Admin
         ];
 
         return get_posts($args);
+    }
+
+    /**
+     * Handle setting dashboard page
+     */
+    public function handle_set_dashboard()
+    {
+        if (!current_user_can('manage_options')) {
+            wp_die('Access denied');
+        }
+
+        $page_id = isset($_GET['page_id']) ? (int)$_GET['page_id'] : 0;
+
+        if ($page_id) {
+            $page = get_post($page_id);
+            if ($page && $page->post_type === 'page') {
+                $settings = get_option('dit_settings', []);
+                $settings['dashboard_page_id'] = $page_id;
+                update_option('dit_settings', $settings);
+
+                echo '<div class="notice notice-success"><p>Dashboard page set to: <strong>' . esc_html($page->post_title) . '</strong></p></div>';
+            } else {
+                echo '<div class="notice notice-error"><p>Invalid page selected.</p></div>';
+            }
+        }
+
+        // Redirect back to settings
+        wp_redirect(admin_url('admin.php?page=dit-integration'));
+        exit;
     }
 
     /**
@@ -428,6 +573,12 @@ class Admin
 
         // Sanitize debug mode
         $sanitized['debug_mode'] = isset($input['debug_mode']) ? (bool)$input['debug_mode'] : false;
+
+        // Sanitize login page ID
+        $sanitized['login_page_id'] = isset($input['login_page_id']) ? (int)$input['login_page_id'] : 0;
+
+        // Sanitize dashboard page ID
+        $sanitized['dashboard_page_id'] = isset($input['dashboard_page_id']) ? (int)$input['dashboard_page_id'] : 0;
 
         error_log('DIT Integration: Sanitized settings: ' . json_encode($sanitized));
         return $sanitized;
@@ -512,7 +663,7 @@ class Admin
 
         // Test API connection
         try {
-            $api = new API();
+            $api = API::get_instance();
             $result = $api->test_connection();
 
             if ($result) {
@@ -871,4 +1022,43 @@ class Admin
             wp_send_json_error(['message' => __('Error getting cache status: ' . $e->getMessage(), 'dit-integration')]);
         }
     }
+
+    /**
+     * Render login debug test page
+     */
+    public function render_login_debug_page()
+    {
+        // Include the test script
+        include_once(DIT_PLUGIN_DIR . 'admin/test-login-debug.php');
+    }
+
+    /**
+     * Render direct admin login page
+     */
+    public function render_direct_admin_login_page()
+    {
+        // Include the direct admin login script
+        include_once(DIT_PLUGIN_DIR . 'admin/direct-admin-login.php');
+    }
+
+
+
+    /**
+     * Render test admin auto login page
+     */
+    public function render_test_admin_auto_login_page()
+    {
+        // Include the test admin auto login script
+        include_once(DIT_PLUGIN_DIR . 'admin/test-admin-auto-login.php');
+    }
+
+    /**
+     * Render test admin session check page
+     */
+    public function render_test_admin_session_check_page()
+    {
+        // Include the test admin session check script
+        include_once(DIT_PLUGIN_DIR . 'admin/test-admin-session-check.php');
+    }
+
 }

@@ -22,22 +22,7 @@ if (!defined('ABSPATH')) {
  */
 class Encryption
 {
-    private $active_key = null;
 
-    public function store_aes_key(string $aes_key): void
-    {
-        $this->active_key = $aes_key;
-    }
-
-    public function clear_temporary_aes_key(): void
-    {
-        $this->active_key = null;
-    }
-
-    public function set_user_permanent_aes_key(string $permanent_aes_key): void
-    {
-        $this->active_key = $permanent_aes_key;
-    }
 
     public function init()
     {
@@ -61,17 +46,6 @@ class Encryption
         }
     }
 
-    public function generate_aes_key(): string
-    {
-        try {
-            $key = random_bytes(32);
-            return base64_encode($key);
-        } catch (Exception $e) {
-            $this->display_error('Failed to generate AES key: ' . $e->getMessage());
-            throw $e;
-        }
-    }
-
     public function generate_iv(): string
     {
         try {
@@ -84,7 +58,65 @@ class Encryption
         }
     }
 
-    public function encrypt_with_aes(string $data, string $aes_key, string $base64_iv): string
+    /**
+     * Generate AES key and IV for steganographic login
+     * 
+     * @return array Array containing 'key' (32 bytes) and 'iv' (16 bytes)
+     * @throws Exception
+     */
+    public function generate_aes_key(): array
+    {
+        try {
+            $key = random_bytes(32);
+            $iv = random_bytes(16);
+
+            return [
+                'key' => $key,
+                'iv' => $iv
+            ];
+        } catch (Exception $e) {
+            $this->display_error('Failed to generate AES key: ' . $e->getMessage());
+            throw $e;
+        }
+    }
+
+    /**
+     * Create steganographic key by interleaving real AES key with random bytes
+     * 
+     * @param string $aesKey Raw binary AES key (32 bytes)
+     * @return string Hex string in format GGKKGGKK... (G=garbage, K=key)
+     * @throws Exception
+     */
+    public function interleave_keys(string $aesKey): string
+    {
+        try {
+            // Verify AES key length
+            if (mb_strlen($aesKey, '8bit') !== 32) {
+                throw new Exception('Invalid AES key length: must be 32 bytes');
+            }
+
+            // Generate random bytes (32 bytes)
+            $randomBytes = random_bytes(32);
+
+            // Convert both to hex
+            $hexAesKey = bin2hex($aesKey);        // 64 hex characters
+            $hexRandom = bin2hex($randomBytes);   // 64 hex characters
+
+            // Interleave: GGKKGGKK... format (G=garbage, K=key)
+            $stegnokey = '';
+            for ($i = 0; $i < 64; $i += 2) {
+                $stegnokey .= substr($hexRandom, $i, 2);  // G (garbage)
+                $stegnokey .= substr($hexAesKey, $i, 2);  // K (key)
+            }
+
+            return $stegnokey;
+        } catch (Exception $e) {
+            $this->display_error('Failed to create steganographic key: ' . $e->getMessage());
+            throw $e;
+        }
+    }
+
+    public function encrypt_with_aes(string $data, string $aes_key, string $iv): string
     {
         try {
             // Check AES key length - use mb_strlen for binary data
@@ -92,10 +124,19 @@ class Encryption
                 throw new Exception('Invalid AES key length: must be 32 bytes');
             }
 
-            // Decode base64 IV to get binary data
-            $iv = base64_decode($base64_iv);
-            if ($iv === false || mb_strlen($iv, '8bit') !== 16) {
-                throw new Exception('Invalid IV format or length');
+            // Handle both binary and base64 IV for backward compatibility
+            $binary_iv = $iv;
+            if (base64_encode(base64_decode($iv, true)) === $iv) {
+                // IV is base64 encoded, decode it to binary
+                $binary_iv = base64_decode($iv);
+                if ($binary_iv === false) {
+                    throw new Exception('Invalid base64 IV format');
+                }
+            }
+
+            // Check IV length
+            if (mb_strlen($binary_iv, '8bit') !== 16) {
+                throw new Exception('Invalid IV length: must be 16 bytes, got ' . mb_strlen($binary_iv, '8bit') . ' bytes');
             }
 
             $encrypted = openssl_encrypt(
@@ -103,14 +144,14 @@ class Encryption
                 'AES-256-CBC',
                 $aes_key,
                 OPENSSL_RAW_DATA,
-                $iv
+                $binary_iv
             );
 
             if ($encrypted === false) {
                 throw new Exception('AES encryption failed: ' . openssl_error_string());
             }
 
-            return base64_encode($encrypted);
+            return $encrypted;  // Return raw encrypted data, not base64 encoded
         } catch (Exception $e) {
             $this->display_error('AES encryption error: ' . $e->getMessage());
             throw $e;
@@ -120,20 +161,76 @@ class Encryption
     public function decrypt_with_aes(string $base64_encrypted, string $aes_key, string $base64_iv): string
     {
         try {
-            // Check AES key length - use mb_strlen for binary data
-            if (mb_strlen($aes_key, '8bit') !== 32) {
-                throw new Exception('Invalid AES key length: must be 32 bytes');
+            // Log parameters for debugging
+            error_log('DIT Integration: decrypt_with_aes called with:');
+            error_log('DIT Integration: - base64_encrypted length: ' . strlen($base64_encrypted));
+            error_log('DIT Integration: - aes_key length: ' . strlen($aes_key) . ' bytes');
+            error_log('DIT Integration: - aes_key preview: ' . substr($aes_key, 0, 20) . '...');
+            error_log('DIT Integration: - base64_iv: ' . $base64_iv);
+
+            // Add detailed key format analysis
+            error_log('DIT Integration: AES Key Format Analysis:');
+            error_log('DIT Integration: - Key length (strlen): ' . strlen($aes_key) . ' bytes');
+            error_log('DIT Integration: - Key length (mb_strlen 8bit): ' . mb_strlen($aes_key, '8bit') . ' bytes');
+            error_log('DIT Integration: - Is base64 encoded: ' . (base64_encode(base64_decode($aes_key, true)) === $aes_key ? 'YES' : 'NO'));
+            error_log('DIT Integration: - Is valid binary: ' . (mb_strlen($aes_key, '8bit') === strlen($aes_key) ? 'YES' : 'NO'));
+
+            // Add key hash for comparison and debugging
+            error_log('DIT Integration: AES Key Hash Analysis:');
+            error_log('DIT Integration: - Key MD5 hash: ' . md5($aes_key));
+            error_log('DIT Integration: - Key SHA256 hash: ' . hash('sha256', $aes_key));
+            error_log('DIT Integration: - Key hex representation: ' . bin2hex($aes_key));
+
+            // Check if key is base64 encoded and decode if necessary
+            if (base64_encode(base64_decode($aes_key, true)) === $aes_key) {
+                error_log('DIT Integration: WARNING - AES key is base64 encoded, decoding to binary');
+                $aes_key = base64_decode($aes_key);
+                error_log('DIT Integration: - Decoded key length: ' . strlen($aes_key) . ' bytes');
+                error_log('DIT Integration: - Decoded key MD5 hash: ' . md5($aes_key));
             }
 
+            // Check AES key length - use mb_strlen for binary data
+            if (mb_strlen($aes_key, '8bit') !== 32) {
+                throw new Exception('Invalid AES key length: must be 32 bytes, got ' . mb_strlen($aes_key, '8bit') . ' bytes');
+            }
+
+            // Decode and validate IV
             $iv = base64_decode($base64_iv);
             if ($iv === false || mb_strlen($iv, '8bit') !== 16) {
                 throw new Exception('Invalid IV format or length');
             }
 
+            // Log IV details
+            error_log('DIT Integration: IV Analysis:');
+            error_log('DIT Integration: - Base64 IV: ' . $base64_iv);
+            error_log('DIT Integration: - Binary IV length: ' . strlen($iv) . ' bytes');
+            error_log('DIT Integration: - IV hex representation: ' . bin2hex($iv));
+            error_log('DIT Integration: - IV MD5 hash: ' . md5($iv));
+
+            // Decode encrypted data
             $encrypted = base64_decode($base64_encrypted);
             if ($encrypted === false) {
                 throw new Exception('Invalid encrypted data format');
             }
+
+            // Log encrypted data details
+            error_log('DIT Integration: Encrypted Data Analysis:');
+            error_log('DIT Integration: - Base64 encrypted length: ' . strlen($base64_encrypted));
+            error_log('DIT Integration: - Binary encrypted length: ' . strlen($encrypted) . ' bytes');
+            error_log('DIT Integration: - Encrypted data MD5 hash: ' . md5($encrypted));
+
+            // Log OpenSSL configuration
+            error_log('DIT Integration: OpenSSL Configuration:');
+            error_log('DIT Integration: - OpenSSL version: ' . OPENSSL_VERSION_TEXT);
+            error_log('DIT Integration: - Available ciphers: ' . implode(', ', openssl_get_cipher_methods()));
+            error_log('DIT Integration: - AES-256-CBC available: ' . (in_array('AES-256-CBC', openssl_get_cipher_methods()) ? 'YES' : 'NO'));
+
+            // Attempt decryption with detailed error logging
+            error_log('DIT Integration: Starting AES-256-CBC decryption...');
+            error_log('DIT Integration: - Algorithm: AES-256-CBC');
+            error_log('DIT Integration: - Key length: ' . strlen($aes_key) . ' bytes');
+            error_log('DIT Integration: - IV length: ' . strlen($iv) . ' bytes');
+            error_log('DIT Integration: - Encrypted data length: ' . strlen($encrypted) . ' bytes');
 
             $decrypted = openssl_decrypt(
                 $encrypted,
@@ -144,8 +241,24 @@ class Encryption
             );
 
             if ($decrypted === false) {
-                throw new Exception('AES decryption failed: ' . openssl_error_string());
+                // Get detailed OpenSSL error information
+                $openssl_errors = [];
+                while ($error = openssl_error_string()) {
+                    $openssl_errors[] = $error;
+                }
+
+                error_log('DIT Integration: OpenSSL Decryption Failed:');
+                error_log('DIT Integration: - Error count: ' . count($openssl_errors));
+                foreach ($openssl_errors as $index => $error) {
+                    error_log('DIT Integration: - Error ' . ($index + 1) . ': ' . $error);
+                }
+
+                throw new Exception('AES decryption failed: ' . implode('; ', $openssl_errors));
             }
+
+            error_log('DIT Integration: decrypt_with_aes successful, decrypted length: ' . strlen($decrypted));
+            error_log('DIT Integration: decrypted preview: ' . substr($decrypted, 0, 100) . '...');
+            error_log('DIT Integration: - Decrypted data MD5 hash: ' . md5($decrypted));
 
             return $decrypted;
         } catch (Exception $e) {
@@ -357,15 +470,7 @@ class Encryption
         return false;
     }
 
-    public function get_active_key(): ?string
-    {
-        return $this->active_key;
-    }
 
-    public function is_configured()
-    {
-        return $this->active_key !== null;
-    }
 
     public function validate_rsa_key(string $rsa_public_key_base64): bool
     {

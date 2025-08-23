@@ -2,17 +2,30 @@
 
 WordPress plugin for integration with Data Integrity Tool API. The plugin provides user registration, data encryption, and interaction with DIT API.
 
+## Role System
+
+The plugin uses a role-based system that matches the API specification:
+
+- **User = 1** (typeUser)
+- **Customer = 2** (typeCustomer) 
+- **Administrator = 3** (typeDIT)
+
+**Important:** All users register as **Customer (2)** by default. Login forms support role selection for existing users.
+
 ## Table of Contents
 
 - [Installation](#installation)
+- [Role System](#role-system)
 - [Architecture](#architecture)
 - [Classes and Methods](#classes-and-methods)
+- [Dashboard System](#dashboard-system)
 - [API Endpoints](#api-endpoints)
 - [Encryption](#encryption)
 - [Logging](#logging)
 - [Usage](#usage)
 - [Testing](#testing)
 - [Known Issues](#known-issues)
+- [Recent Updates](#recent-updates)
 
 ## Installation
 
@@ -167,7 +180,94 @@ Example:
 
 The plugin extracts the numbers and sends them as the `tools` array to the API. If no checkboxes are selected, an empty array `[]` is sent.
 
-For detailed setup instructions, see [CHECKBOX_SETUP_GUIDE.md](CHECKBOX_SETUP_GUIDE.md).
+For detailed setup instructions, see the checkbox processing section above.
+
+## Dashboard System
+
+### Overview
+
+The plugin implements a comprehensive dashboard system with role-based interfaces:
+
+- **Customer (role 2)**: Full management interface with user management and tools
+- **User (role 1)**: Basic interface with tool access and account settings
+
+### Dashboard Templates
+
+#### Customer Dashboard (`templates/dashboard/customer-dashboard.php`)
+
+**Features:**
+- **User Management**: List, add, and delete users associated with the customer
+- **Tools Overview**: Display available tools (Data Integrity Tool, Audit Trail, Compliance Checker, Report Generator)
+- **Account Settings**: Change password and view account information
+
+**AJAX Functions:**
+- `dit_get_customer_users` - Retrieve user list
+- `dit_add_user` - Add new user
+- `dit_delete_user` - Delete user
+- `dit_update_password` - Update password
+
+#### User Dashboard (`templates/dashboard/user-dashboard.php`)
+
+**Features:**
+- **Available Tools**: Display and launch available tools
+- **Account Settings**: Change password and view account information
+- **Recent Activity**: View recent user activity
+
+**AJAX Functions:**
+- `dit_get_user_activity` - Get user activity
+- `dit_update_password` - Update password
+
+### Navigation Structure
+
+```
+/dashboard/              # Main dashboard (role-specific)
+/dashboard/account       # Account settings
+/dashboard/users         # User management (Customer only)
+/dashboard/licenses      # License management
+/dashboard/payments      # Payment history (Customer only)
+```
+
+### Security Features
+
+- **Role-based access control**: Different interfaces for different roles
+- **Nonce validation**: All AJAX requests validated with WordPress nonces
+- **Session management**: Automatic session timeout and activity tracking
+- **Input validation**: Server-side validation for all user inputs
+
+### Frontend Implementation
+
+#### JavaScript Files
+- `assets/js/dashboard.js` - Core dashboard functionality
+- `assets/js/customer-dashboard.js` - Customer-specific features
+- `assets/js/user-dashboard.js` - User-specific features
+
+#### CSS Styling
+- `assets/css/dashboard.css` - Responsive design with modern UI
+- Mobile-friendly layout
+- Modal dialogs for user interactions
+- Loading states and animations
+
+### Current Status
+
+**Implemented:**
+- ✅ Role-based dashboard templates
+- ✅ User management for customers
+- ✅ Tool display and access
+- ✅ Account settings and password changes
+- ✅ AJAX handlers for all operations
+- ✅ Responsive design and modern UI
+- ✅ Security validations and access control
+
+**Mock Data (Ready for API Integration):**
+- User lists for customers
+- User activity data
+- Tool availability information
+
+**Future Enhancements:**
+- Real API integration for user management
+- Advanced user editing capabilities
+- Detailed activity tracking
+- Export functionality for reports
 
 ## API Endpoints
 
@@ -317,9 +417,145 @@ To test checkbox processing:
    - Verify tools array format
    - Confirm default values when no selection
 
-## Known Issues
+## Role System Details
 
-### 1. Base64 Decoding Error
+### Role Mapping
+
+The plugin uses numeric role IDs that match the API specification:
+
+| Role | Numeric ID | API Value | Description |
+|------|------------|-----------|-------------|
+| User | 1 | typeUser = 1 | Regular user with basic access |
+| Customer | 2 | typeCustomer = 2 | Customer with management rights |
+| Administrator | 3 | typeDIT = 3 | Administrator with full access |
+
+### Registration Process
+
+All new registrations automatically assign the **Customer (2)** role:
+
+1. User fills registration form
+2. System extracts form data
+3. **Role automatically set to Customer (2)**
+4. Data sent to API with `role_id = 2`
+5. API returns `customer_id`
+6. User logged in as Customer
+
+### Login Process
+
+Login forms support role selection for existing users:
+
+1. User fills login form with role selection
+2. System maps text role to numeric ID:
+   - "user" → 1
+   - "customer" → 2
+   - "administrator" → 3
+3. Login request sent with `role_id`
+4. API validates role and returns user data
+5. Session created with correct role
+
+### Role Priority in Login
+
+The system determines user role in this order:
+
+1. `role_id` from form submission (highest priority)
+2. `customer_id` from API response
+3. Saved `customer_id` from registration
+4. `user_id` from API response
+5. Default to User (1)
+
+### Dashboard Navigation
+
+Dashboard navigation is role-based:
+
+- **Customer (2)**: User Management, License Management, Payment History
+- **User (1) & Administrator (3)**: My License
+
+### Legacy Role Migration
+
+The system automatically migrates old text-based roles to numeric IDs:
+
+| Legacy Role | New Role ID |
+|-------------|-------------|
+| "user" | 1 |
+| "customer" | 2 |
+| "administrator" | 3 |
+| "admin" | 3 |
+| "client" | 2 |
+| "standard" | 1 |
+
+### Testing Role System
+
+Run the test script to verify the role system:
+```bash
+php test-role-mapping-simple.php
+```
+
+### Migration Script
+
+To migrate existing users to the new role system:
+```bash
+php migrate-roles-to-api.php
+```
+
+## Recent Updates
+
+### Dashboard System Implementation (Latest)
+
+**Date:** January 2025
+
+**Major Features Added:**
+- ✅ **Role-based Dashboard Templates**: Separate interfaces for Customer and User roles
+- ✅ **Customer Dashboard**: Full user management with add/delete functionality
+- ✅ **User Dashboard**: Tool access and account settings
+- ✅ **AJAX Integration**: Complete frontend-backend communication
+- ✅ **Responsive Design**: Mobile-friendly modern UI
+- ✅ **Security Implementation**: Nonce validation and role-based access control
+
+**Technical Implementation:**
+- Created `templates/dashboard/` directory with role-specific templates
+- Implemented `assets/js/customer-dashboard.js` and `assets/js/user-dashboard.js`
+- Enhanced `assets/css/dashboard.css` with modern styling
+- Updated `includes/class-dashboard.php` with AJAX handlers
+- Added comprehensive security validations
+
+**Files Created/Modified:**
+```
+templates/dashboard/
+├── customer-dashboard.php    # Customer interface
+└── user-dashboard.php        # User interface
+
+assets/js/
+├── customer-dashboard.js     # Customer functionality
+└── user-dashboard.js         # User functionality
+
+assets/css/
+└── dashboard.css             # Enhanced styling
+
+includes/
+└── class-dashboard.php       # Updated with AJAX handlers
+```
+
+**Current Status:**
+- Dashboard system fully functional with mock data
+- Ready for API integration
+- All security measures implemented
+- Responsive design completed
+
+### Previous Updates
+
+**Role System Enhancement (December 2024):**
+- Implemented numeric role system (1=User, 2=Customer, 3=Administrator)
+- Added role determination logic with priority system
+- Created session management with role-based access
+- Fixed role migration from legacy text-based system
+
+**API Integration (November 2024):**
+- Implemented DIT API integration
+- Added encryption/decryption system
+- Created WPForms integration
+- Added comprehensive logging system
+
+## Known Issues
 **Problem:** Server cannot decode Base64 string due to format issues.
 
 **Server error:**
@@ -352,6 +588,139 @@ System.FormatException: The input is not a valid Base-64 string as it contains a
 
 **Status:** ✅ Resolved - Now using direct RSA encryption without wrapper
 
+## Enhanced Encrypted Response Handling
+
+### Overview
+The plugin now includes a comprehensive system for handling encrypted API responses with multiple fallback strategies and detailed logging.
+
+### New Methods
+
+#### `handle_encrypted_response()`
+Universal method for processing encrypted API responses.
+
+**Parameters:**
+- `$response_body` (string) - Raw response body from API
+- `$operation_name` (string) - Name of the operation for logging
+- `$context` (array) - Additional context data for logging
+
+**Returns:** `array|null` - Decrypted and parsed data or null on failure
+
+**Features:**
+- Automatic JSON parsing attempt first
+- Encrypted data detection via regex pattern
+- Multiple AES key retrieval strategies
+- Multiple IV decryption strategies
+- Comprehensive error logging
+
+#### `handle_encrypted_response_with_headers()`
+Enhanced version that also checks response headers for IV.
+
+**Parameters:**
+- `$response_body` (string) - Raw response body from API
+- `$response_headers` (array) - Response headers
+- `$operation_name` (string) - Name of the operation for logging
+- `$context` (array) - Additional context data for logging
+
+**Returns:** `array|null` - Decrypted and parsed data or null on failure
+
+**Features:**
+- All features from `handle_encrypted_response()`
+- IV extraction from response headers
+- Header IV decryption attempt before fallback strategies
+
+#### `get_aes_key_for_decryption()`
+Retrieves AES key from multiple sources with fallback strategy.
+
+**Returns:** `string|null` - AES key or null if not found
+
+**Retrieval Order:**
+1. Session Manager
+2. Cookies
+3. Encryption Class
+4. WordPress User Meta
+
+#### `attempt_decryption_with_multiple_ivs()`
+Attempts decryption with different IV strategies.
+
+**Parameters:**
+- `$encrypted_data` (string) - Base64 encoded encrypted data
+- `$aes_key` (string) - AES key for decryption
+- `$operation_name` (string) - Name of the operation for logging
+- `$context` (array) - Additional context data for logging
+
+**Returns:** `string|null` - Decrypted data or null on failure
+
+**IV Strategies:**
+- `zero_iv` - 16 bytes of zeros
+- `one_iv` - 16 bytes of ones
+- `random_iv` - Random 16 bytes (unlikely to work)
+
+#### `store_aes_key_redundantly()`
+Stores AES key in multiple locations for redundancy.
+
+**Parameters:**
+- `$aes_key` (string) - AES key to store
+- `$user_id` (int) - User ID for WordPress user meta
+
+**Returns:** `bool` - True if key was stored successfully
+
+**Storage Locations:**
+1. Session Manager
+2. Encryption Class
+3. Cookies
+4. WordPress User Meta
+
+#### `clear_aes_key_from_all_locations()`
+Clears AES key from all storage locations.
+
+**Parameters:**
+- `$user_id` (int) - User ID for WordPress user meta
+
+**Returns:** `bool` - True if key was cleared successfully
+
+### Usage Example
+
+```php
+// In an API method
+$data = $this->handle_encrypted_response_with_headers(
+    $response_body,
+    $response_headers,
+    'Get Users For Customer',
+    ['user_id' => $customer_id]
+);
+
+if ($data === null) {
+    throw new Exception('Failed to parse or decrypt response');
+}
+
+return $data;
+```
+
+### Logging
+
+The system provides detailed logging for all operations:
+
+- **JSON parsing attempts**
+- **Encrypted data detection**
+- **AES key retrieval from different sources**
+- **IV strategy attempts**
+- **Decryption success/failure**
+- **Storage operations**
+
+### Error Handling
+
+- Graceful fallback between different IV strategies
+- Multiple AES key sources for redundancy
+- Detailed error messages for debugging
+- Comprehensive logging for troubleshooting
+
+### Security Considerations
+
+- IV should ideally be provided by the server in headers
+- Current IV strategies are for compatibility/testing
+- AES keys are stored in multiple locations for redundancy
+- All operations are logged for audit purposes
+
 ## Configuration
 
 ### Required PHP extensions:
@@ -373,5 +742,5 @@ For technical support, contact API developers or create issues in the repository
 
 ---
 
-**Version:** 1.0.1  
-**Last updated:** June 23, 2025 
+**Version:** 1.1.0  
+**Last updated:** July 10, 2025 

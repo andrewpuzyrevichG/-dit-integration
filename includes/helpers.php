@@ -159,12 +159,15 @@ function is_dit_api_configured()
  * @param string $user_name User name.
  * @param int $customer_id Customer ID from DIT API.
  * @param string $permanent_aes_key Permanent AES key for future use.
+ * @param array $additional_data Additional user data (first_name, last_name, company, email).
  * @return bool True if data was saved successfully.
  */
-function save_user_data($user_name, $customer_id, $permanent_aes_key)
+function save_user_data($user_name, $customer_id, $permanent_aes_key, $additional_data = [])
 {
     try {
         $settings = get_settings();
+        $short_key = substr($permanent_aes_key, 0, 12) . '...';
+        log_message("[save_user_data] Called for customer_id={$customer_id}, AES key(part)={$short_key}", 'info');
 
         // Add user metadata to settings (without AES key)
         $settings['registered_users'][$customer_id] = [
@@ -172,17 +175,45 @@ function save_user_data($user_name, $customer_id, $permanent_aes_key)
             'customer_id' => (int) $customer_id,
             'registration_date' => current_time('mysql'),
             'last_updated' => current_time('mysql'),
-            'aes_key_stored_in_cookie' => true // Flag indicating AES key is in cookie
+            'aes_key_stored_in_cookie' => true, // Flag indicating AES key is in cookie
+            'first_name' => sanitize_text_field($additional_data['first_name'] ?? ''),
+            'last_name' => sanitize_text_field($additional_data['last_name'] ?? ''),
+            'company' => sanitize_text_field($additional_data['company'] ?? ''),
+            'email' => sanitize_email($additional_data['email'] ?? '')
         ];
 
         // Save updated settings (without AES key)
         $result = update_option('dit_settings', $settings);
+        log_message("[save_user_data] update_option result: " . var_export($result, true), 'info');
 
-        // Save AES key to user's browser cookie (more secure)
+        // Save AES key to user's browser cookie (per customer_id)
         $cookie_result = save_customer_data_to_cookies($customer_id, $permanent_aes_key, 365); // 1 year
+        log_message("[save_user_data] save_customer_data_to_cookies result: " . var_export($cookie_result, true), 'info');
+
+        // Save AES key to session (per customer_id)
+        if (!isset($_SESSION)) {
+            session_start();
+        }
+        if (!isset($_SESSION['dit_aes_keys'])) {
+            $_SESSION['dit_aes_keys'] = [];
+        }
+        $_SESSION['dit_aes_keys'][$customer_id] = $permanent_aes_key;
+        log_message("[save_user_data] AES key saved to session for customer_id={$customer_id}", 'info');
+
+        // Save AES key to user_meta (per customer_id)
+        $meta_result = null;
+        if (function_exists('get_current_user_id') && is_user_logged_in()) {
+            $meta_result = update_user_meta(get_current_user_id(), 'dit_aes_key_' . $customer_id, $permanent_aes_key);
+            log_message("[save_user_data] update_user_meta for user_id=" . get_current_user_id() . ", customer_id={$customer_id}, result: " . var_export($meta_result, true), 'info');
+        } else {
+            log_message("[save_user_data] User not logged in, user_meta not updated", 'info');
+        }
+
+        // Note: AES key is no longer stored in database, only in session/cookies/user_meta
+        log_message("[save_user_data] AES key stored in session/cookies/user_meta for customer_id={$customer_id}", 'info');
 
         if ($result && $cookie_result) {
-            log_message("User data saved successfully for customer ID: {$customer_id} (metadata in DB, AES key in cookie)", 'info');
+            log_message("User data saved successfully for customer ID: {$customer_id} (metadata in DB, AES key in session/cookies/user_meta)", 'info');
             return true;
         } else {
             log_message("Failed to save user data for customer ID: {$customer_id}", 'error');
@@ -202,38 +233,119 @@ function save_user_data($user_name, $customer_id, $permanent_aes_key)
  */
 function get_user_data($customer_id)
 {
-    // Get user metadata from settings
     $settings = get_settings();
     $user_data = $settings['registered_users'][$customer_id] ?? null;
-
     if ($user_data) {
-        // Get AES key from cookie
-        $aes_key = get_aes_key_from_cookies();
-
-        if ($aes_key) {
-            $user_data['permanent_aes_key'] = $aes_key;
-            log_message("User data retrieved for customer ID: {$customer_id} (metadata from DB, AES key from cookie)", 'info');
-        } else {
-            log_message("User metadata found but AES key not in cookie for customer ID: {$customer_id}", 'warning');
-            $user_data['permanent_aes_key'] = null;
-        }
-
+        $aes_key = get_user_permanent_aes_key($customer_id);
+        $user_data['permanent_aes_key'] = $aes_key;
         return $user_data;
     }
-
-    log_message("User data not found for customer ID: {$customer_id}", 'info');
     return null;
 }
 
 /**
- * Get permanent AES key for a user.
+ * Get permanent AES key for user by customer ID.
  *
  * @param int $customer_id Customer ID.
  * @return string|null Permanent AES key or null if not found.
  */
 function get_user_permanent_aes_key($customer_id)
 {
-    return get_aes_key_from_cookies();
+    if (!isset($_SESSION)) {
+        session_start();
+    }
+
+    error_log('DIT Helpers: === GET USER PERMANENT AES KEY ===');
+    error_log('DIT Helpers: Customer ID: ' . ($customer_id ?? 'NULL'));
+
+    // ПРІОРИТЕТ 1: Перевіряємо dit_aes_keys[customer_id] - оригінальний AES ключ
+    if ($customer_id && isset($_SESSION['dit_aes_keys'][$customer_id])) {
+        $aes_key = $_SESSION['dit_aes_keys'][$customer_id];
+
+        // Перевіряємо, чи це оригінальний AES ключ (32 байти) або стеганографічний (128 символів)
+        if (strlen($aes_key) === 32) {
+            error_log('DIT Helpers: - Found original AES key in dit_aes_keys[' . $customer_id . ']');
+            error_log('DIT Helpers: - Key length: ' . strlen($aes_key) . ' bytes (original AES key)');
+            error_log('DIT Helpers: - Key preview: ' . bin2hex(substr($aes_key, 0, 8)) . '...');
+
+            // ВАЖЛИВО: Повертаємо оригінальний AES ключ (32 байти)
+            return $aes_key;
+        } elseif (ctype_xdigit($aes_key) && strlen($aes_key) === 128) {
+            error_log('DIT Helpers: - WARNING: Found steganography key in dit_aes_keys[' . $customer_id . ']');
+            error_log('DIT Helpers: - Key length: ' . strlen($aes_key) . ' chars (steganography format)');
+            error_log('DIT Helpers: - This should be the original AES key, not steganography key');
+
+            // Конвертуємо стеганографічний ключ в оригінальний AES ключ
+            $steganography = new \DIT\Steganography();
+            $original_aes_key = $steganography->extract_aes_key_from_steganography($aes_key);
+            if ($original_aes_key) {
+                error_log('DIT Helpers: - Converted steganography key to original AES key');
+                error_log('DIT Helpers: - Converted key length: ' . strlen($original_aes_key) . ' bytes');
+                return $original_aes_key;
+            }
+        } else {
+            error_log('DIT Helpers: - WARNING: Key in dit_aes_keys[' . $customer_id . '] has unknown format');
+            error_log('DIT Helpers: - Key length: ' . strlen($aes_key) . ' chars');
+            error_log('DIT Helpers: - Key type: ' . (ctype_xdigit($aes_key) ? 'hex' : 'binary'));
+        }
+    }
+
+    // ПРІОРИТЕТ 2: Перевіряємо cookies
+    if ($customer_id && isset($_COOKIE['dit_aes_key_' . $customer_id])) {
+        $cookie_key = $_COOKIE['dit_aes_key_' . $customer_id];
+
+        // Перевіряємо, чи це base64-кодований оригінальний AES ключ
+        if (strlen($cookie_key) === 44) { // base64(32 bytes) = 44 chars
+            $decoded_key = base64_decode($cookie_key, true);
+            if ($decoded_key !== false && strlen($decoded_key) === 32) {
+                error_log('DIT Helpers: - Found original AES key in cookies for customer_id ' . $customer_id);
+                error_log('DIT Helpers: - Key length: ' . strlen($decoded_key) . ' bytes (decoded from base64)');
+                return $decoded_key;
+            }
+        }
+
+        // Перевіряємо, чи це стеганографічний ключ
+        if (ctype_xdigit($cookie_key) && strlen($cookie_key) === 128) {
+            error_log('DIT Helpers: - Found steganography key in cookies for customer_id ' . $customer_id);
+            error_log('DIT Helpers: - Converting steganography key to original AES key');
+
+            $steganography = new \DIT\Steganography();
+            $original_aes_key = $steganography->extract_aes_key_from_steganography($cookie_key);
+            if ($original_aes_key) {
+                error_log('DIT Helpers: - Converted steganography key to original AES key');
+                error_log('DIT Helpers: - Converted key length: ' . strlen($original_aes_key) . ' bytes');
+                return $original_aes_key;
+            }
+        }
+    }
+
+    // ПРІОРИТЕТ 3: Legacy fallback - login_aes_key
+    if (isset($_SESSION['login_aes_key'])) {
+        $base64_key = $_SESSION['login_aes_key'];
+        $binary_key = base64_decode($base64_key, true);
+
+        if ($binary_key !== false && strlen($binary_key) === 32) {
+            error_log('DIT Helpers: - Found original AES key in login_aes_key (legacy)');
+            error_log('DIT Helpers: - Key length: ' . strlen($binary_key) . ' bytes');
+            return $binary_key;
+        }
+    }
+
+    // ПРІОРИТЕТ 4: Legacy fallback - cookies
+    if (isset($_COOKIE['dit_login_aes_key'])) {
+        $base64_key = $_COOKIE['dit_login_aes_key'];
+        $binary_key = base64_decode($base64_key, true);
+
+        if ($binary_key !== false && strlen($binary_key) === 32) {
+            error_log('DIT Helpers: - Found original AES key in dit_login_aes_key cookie (legacy)');
+            error_log('DIT Helpers: - Key length: ' . strlen($binary_key) . ' bytes');
+            return $binary_key;
+        }
+    }
+
+    error_log('DIT Helpers: - No valid AES key found for customer_id ' . $customer_id);
+    error_log('DIT Helpers: === GET USER PERMANENT AES KEY COMPLETE ===');
+    return null;
 }
 
 /**
@@ -246,6 +358,87 @@ function get_user_name($customer_id)
 {
     $user_data = get_user_data($customer_id);
     return $user_data['name'] ?? null;
+}
+
+/**
+ * Get user first name by customer ID.
+ *
+ * @param int $customer_id Customer ID.
+ * @return string|null User first name or null if not found.
+ */
+function get_user_first_name($customer_id)
+{
+    $user_data = get_user_data($customer_id);
+    return $user_data['first_name'] ?? null;
+}
+
+/**
+ * Get user last name by customer ID.
+ *
+ * @param int $customer_id Customer ID.
+ * @return string|null User last name or null if not found.
+ */
+function get_user_last_name($customer_id)
+{
+    $user_data = get_user_data($customer_id);
+    return $user_data['last_name'] ?? null;
+}
+
+/**
+ * Get user company by customer ID.
+ *
+ * @param int $customer_id Customer ID.
+ * @return string|null User company or null if not found.
+ */
+function get_user_company($customer_id)
+{
+    $user_data = get_user_data($customer_id);
+    return $user_data['company'] ?? null;
+}
+
+/**
+ * Get user email by customer ID.
+ *
+ * @param int $customer_id Customer ID.
+ * @return string|null User email or null if not found.
+ */
+function get_user_email($customer_id)
+{
+    $user_data = get_user_data($customer_id);
+    return $user_data['email'] ?? null;
+}
+
+/**
+ * Get customer ID by email.
+ *
+ * @param string $email User email.
+ * @return int|null Customer ID or null if not found.
+ */
+function get_customer_id_by_email($email)
+{
+    // First try to get from session
+    if (isset($_SESSION['dit_registered_customers'])) {
+        foreach ($_SESSION['dit_registered_customers'] as $customer_id => $user_data) {
+            if (isset($user_data['email']) && $user_data['email'] === $email) {
+                log_message("Customer ID found in session for email: {$email}, ID: {$customer_id}", 'info');
+                return (int) $customer_id;
+            }
+        }
+    }
+
+    // Fallback to WordPress settings (for backward compatibility)
+    $settings = get_settings();
+    $registered_users = $settings['registered_users'] ?? [];
+
+    foreach ($registered_users as $customer_id => $user_data) {
+        if (isset($user_data['email']) && $user_data['email'] === $email) {
+            log_message("Customer ID found in WordPress settings for email: {$email}, ID: {$customer_id}", 'info');
+            return (int) $customer_id;
+        }
+    }
+
+    log_message("No customer ID found for email: {$email}", 'warning');
+    return null;
 }
 
 /**
@@ -276,15 +469,12 @@ function save_customer_data_to_cookies($customer_id, $aes_key, $expiry_days = 36
         ];
 
         // Save customer ID
-        $customer_id_cookie = 'dit_customer_id';
-        $customer_id_result = setcookie($customer_id_cookie, $customer_id, $cookie_options);
+        setcookie('dit_customer_id', $customer_id, $cookie_options);
 
-        // Save AES key
-        $aes_key_cookie = 'dit_aes_key';
-        $aes_key_encoded = base64_encode($aes_key);
-        $aes_key_result = setcookie($aes_key_cookie, $aes_key_encoded, $cookie_options);
+        // Save AES key per customer_id
+        setcookie('dit_aes_key_' . $customer_id, base64_encode($aes_key), $cookie_options);
 
-        if ($customer_id_result && $aes_key_result) {
+        if (setcookie('dit_customer_id', $customer_id, $cookie_options) && setcookie('dit_aes_key_' . $customer_id, base64_encode($aes_key), $cookie_options)) {
             log_message("Customer ID and AES key saved to cookies for customer ID: {$customer_id}", 'info');
             return true;
         } else {
@@ -349,10 +539,62 @@ function get_customer_id_from_cookies()
  *
  * @return string|null AES key or null if not found
  */
-function get_aes_key_from_cookies()
+function get_aes_key_from_cookies($customer_id = null)
 {
-    $customer_data = get_customer_data_from_cookies();
-    return $customer_data['aes_key'] ?? null;
+    error_log('DIT Integration: get_aes_key_from_cookies called with customer_id: ' . ($customer_id ?? 'null'));
+
+    // Log all DIT cookies for debugging
+    $dit_cookies = [];
+    foreach ($_COOKIE as $name => $value) {
+        if (strpos($name, 'dit_') === 0) {
+            $dit_cookies[$name] = substr($value, 0, 20) . '...'; // Truncate for security
+        }
+    }
+    error_log('DIT Integration: Available DIT cookies: ' . json_encode($dit_cookies));
+
+    if ($customer_id === null && isset($_COOKIE['dit_customer_id'])) {
+        $customer_id = $_COOKIE['dit_customer_id'];
+        error_log('DIT Integration: Using customer_id from cookie: ' . $customer_id);
+    }
+
+    // Try new format first (dit_aes_key_123)
+    if ($customer_id && isset($_COOKIE['dit_aes_key_' . $customer_id])) {
+        $base64_key = $_COOKIE['dit_aes_key_' . $customer_id];
+        $binary_key = base64_decode($base64_key);
+        error_log('DIT Integration: Found AES key in new format cookies for customer_id ' . $customer_id);
+        error_log('DIT Integration: Base64 key length: ' . strlen($base64_key));
+        error_log('DIT Integration: Binary key length: ' . strlen($binary_key));
+
+        // Add key hash for comparison and debugging
+        error_log('DIT Integration: New Format Cookie Key Hash Analysis:');
+        error_log('DIT Integration: - Base64 key MD5 hash: ' . md5($base64_key));
+        error_log('DIT Integration: - Binary key MD5 hash: ' . md5($binary_key));
+        error_log('DIT Integration: - Binary key SHA256 hash: ' . hash('sha256', $binary_key));
+        error_log('DIT Integration: - Binary key hex representation: ' . bin2hex($binary_key));
+
+        return $binary_key;
+    }
+
+    // Try old format (dit_aes_key)
+    if (isset($_COOKIE['dit_aes_key'])) {
+        $base64_key = $_COOKIE['dit_aes_key'];
+        $binary_key = base64_decode($base64_key);
+        error_log('DIT Integration: Found AES key in old format cookies');
+        error_log('DIT Integration: Base64 key length: ' . strlen($base64_key));
+        error_log('DIT Integration: Binary key length: ' . strlen($binary_key));
+
+        // Add key hash for comparison and debugging
+        error_log('DIT Integration: Old Format Cookie Key Hash Analysis:');
+        error_log('DIT Integration: - Base64 key MD5 hash: ' . md5($base64_key));
+        error_log('DIT Integration: - Binary key MD5 hash: ' . md5($binary_key));
+        error_log('DIT Integration: - Binary key SHA256 hash: ' . hash('sha256', $binary_key));
+        error_log('DIT Integration: - Binary key hex representation: ' . bin2hex($binary_key));
+
+        return $binary_key;
+    }
+
+    error_log('DIT Integration: No AES key found in cookies for customer_id ' . ($customer_id ?? 'null'));
+    return null;
 }
 
 /**
@@ -402,28 +644,409 @@ function has_customer_data_in_cookies()
 }
 
 /**
- * Get all DIT cookies (for debugging)
+ * Get all DIT cookies for debugging.
  *
- * @return array Array of cookie information
+ * @return array Array of DIT cookies.
  */
 function get_all_dit_cookies()
 {
-    $dit_cookies = [];
+    $cookies = [];
 
     if (isset($_COOKIE['dit_customer_id'])) {
-        $dit_cookies['customer_id'] = [
-            'value' => $_COOKIE['dit_customer_id'],
-            'length' => strlen($_COOKIE['dit_customer_id'])
-        ];
+        $cookies['dit_customer_id'] = $_COOKIE['dit_customer_id'];
     }
 
     if (isset($_COOKIE['dit_aes_key'])) {
-        $dit_cookies['aes_key'] = [
-            'value' => $_COOKIE['dit_aes_key'],
-            'length' => strlen($_COOKIE['dit_aes_key']),
-            'encoded' => true
-        ];
+        $cookies['dit_aes_key'] = substr($_COOKIE['dit_aes_key'], 0, 20) . '...'; // Truncate for security
     }
 
-    return $dit_cookies;
+    return $cookies;
+}
+
+/**
+ * Save session data to user session.
+ *
+ * @param array $session_data Session data to save.
+ * @return bool True if saved successfully.
+ */
+function save_session_data($session_data)
+{
+    try {
+        if (!session_id()) {
+            session_start();
+        }
+
+        $_SESSION['dit_session'] = $session_data;
+
+        log_message("Session data saved successfully for user: " . ($session_data['email'] ?? 'unknown'), 'info');
+        return true;
+    } catch (\Exception $e) {
+        log_message("Error saving session data: " . $e->getMessage(), 'error');
+        return false;
+    }
+}
+
+/**
+ * Get current session data.
+ *
+ * @return array|null Session data or null if not found.
+ */
+function get_session_data()
+{
+    try {
+        if (!session_id()) {
+            session_start();
+        }
+
+        return $_SESSION['dit_session'] ?? null;
+    } catch (\Exception $e) {
+        log_message("Error getting session data: " . $e->getMessage(), 'error');
+        return null;
+    }
+}
+
+/**
+ * Check if user has active session.
+ *
+ * @return bool True if user has active session.
+ */
+function has_active_session()
+{
+    $session_data = get_session_data();
+    return $session_data !== null && !empty($session_data['session_id']);
+}
+
+/**
+ * Get current session ID.
+ *
+ * @return int|null Session ID or null if not found.
+ */
+function get_current_session_id()
+{
+    $session_data = get_session_data();
+    return $session_data['session_id'] ?? null;
+}
+
+/**
+ * Get current user ID from session.
+ *
+ * @return int|null User ID or null if not found.
+ */
+function get_current_user_id()
+{
+    $session_data = get_session_data();
+    return $session_data['user_id'] ?? null;
+}
+
+/**
+ * Get current user email from session.
+ *
+ * @return string|null User email or null if not found.
+ */
+function get_current_user_email()
+{
+    $session_data = get_session_data();
+    return $session_data['email'] ?? null;
+}
+
+/**
+ * End current session.
+ *
+ * @return bool True if session ended successfully.
+ */
+function end_current_session()
+{
+    try {
+        $session_data = get_session_data();
+        if (!$session_data) {
+            return true; // No session to end
+        }
+
+        $session_id = $session_data['session_id'] ?? null;
+        if ($session_id) {
+            // Call API to end session
+            $core = Core::get_instance();
+            $api = $core->api;
+            $result = $api->end_session($session_id);
+
+            if ($result !== null) {
+                log_message("Session ended successfully via API for session ID: {$session_id}", 'info');
+            } else {
+                log_message("Failed to end session via API for session ID: {$session_id}", 'warning');
+            }
+        }
+
+        // Clear session data
+        if (!session_id()) {
+            session_start();
+        }
+        unset($_SESSION['dit_session']);
+
+        log_message("Session data cleared from PHP session", 'info');
+        return true;
+    } catch (\Exception $e) {
+        log_message("Error ending session: " . $e->getMessage(), 'error');
+        return false;
+    }
+}
+
+/**
+ * Record session transition.
+ *
+ * @param int $frame Frame number.
+ * @param int $layer Layer number.
+ * @param int $error Error code (optional, defaults to 0).
+ * @return bool True if transition recorded successfully.
+ */
+function record_session_transition($frame, $layer, $error = 0)
+{
+    try {
+        $session_id = get_current_session_id();
+        if (!$session_id) {
+            log_message("No active session found for recording transition", 'warning');
+            return false;
+        }
+
+        $core = Core::get_instance();
+        $api = $core->api;
+        $result = $api->session_transition($session_id, $frame, $layer, $error);
+
+        if ($result) {
+            log_message("Session transition recorded successfully: Frame {$frame}, Layer {$layer}", 'info');
+        } else {
+            log_message("Failed to record session transition: Frame {$frame}, Layer {$layer}", 'warning');
+        }
+
+        return $result;
+    } catch (\Exception $e) {
+        log_message("Error recording session transition: " . $e->getMessage(), 'error');
+        return false;
+    }
+}
+
+/**
+ * Get remaining session time.
+ *
+ * @return int|null Remaining seconds or null if not available.
+ */
+function get_remaining_session_time()
+{
+    $session_data = get_session_data();
+    return $session_data['remaining_seconds'] ?? null;
+}
+
+/**
+ * Check if session has time remaining.
+ *
+ * @return bool True if session has time remaining.
+ */
+function has_session_time_remaining()
+{
+    $remaining = get_remaining_session_time();
+    return $remaining === null || $remaining > 0; // null means unlimited (metered license)
+}
+
+/**
+ * Get session license type.
+ *
+ * @return int|null License type (0=metered, 1=time-based) or null if not found.
+ */
+function get_session_license_type()
+{
+    $session_data = get_session_data();
+    return $session_data['license_type'] ?? null;
+}
+
+/**
+ * Get session tool type.
+ *
+ * @return int|null Tool type (0=VFX, 1=DI, 2=Archive, 3=Production) or null if not found.
+ */
+function get_session_tool_type()
+{
+    $session_data = get_session_data();
+    return $session_data['tool_type'] ?? null;
+}
+
+/**
+ * Get tool type name.
+ *
+ * @param int $tool_type Tool type number.
+ * @return string Tool type name.
+ */
+function get_tool_type_name($tool_type)
+{
+    $tool_types = [
+        0 => 'VFX',
+        1 => 'DI',
+        2 => 'Archive',
+        3 => 'Production'
+    ];
+
+    return $tool_types[$tool_type] ?? 'Unknown';
+}
+
+/**
+ * Get license type name.
+ *
+ * @param int $license_type License type number.
+ * @return string License type name.
+ */
+function get_license_type_name($license_type)
+{
+    $license_types = [
+        0 => 'Metered',
+        1 => 'Time-based'
+    ];
+
+    return $license_types[$license_type] ?? 'Unknown';
+}
+
+/**
+ * Fix customer ID for a user by adding them to settings
+ *
+ * @param string $email User email
+ * @param int $user_id User ID
+ * @param string $first_name First name
+ * @param string $last_name Last name
+ * @param string $company Company name
+ * @return array Result with success status and message
+ */
+function fix_customer_id($email, $user_id, $first_name = '', $last_name = '', $company = '')
+{
+    try {
+        // Get current settings
+        $settings = get_settings();
+        $registered_users = $settings['registered_users'] ?? [];
+
+        // Check if user already exists
+        if (isset($registered_users[$user_id])) {
+            return [
+                'success' => true,
+                'message' => 'User already exists in settings',
+                'user_data' => $registered_users[$user_id]
+            ];
+        }
+
+        // Add user to settings
+        $settings['registered_users'][$user_id] = [
+            'name' => trim($first_name . ' ' . $last_name),
+            'customer_id' => $user_id,
+            'registration_date' => current_time('mysql'),
+            'last_updated' => current_time('mysql'),
+            'aes_key_stored_in_cookie' => true,
+            'first_name' => $first_name,
+            'last_name' => $last_name,
+            'company' => $company,
+            'email' => $email
+        ];
+
+        // Save settings
+        $result = update_option('dit_settings', $settings);
+
+        if ($result) {
+            log_message("User {$email} (ID: {$user_id}) successfully added to settings", 'info');
+            return [
+                'success' => true,
+                'message' => "User successfully added to settings! Customer ID is now {$user_id}",
+                'user_data' => $settings['registered_users'][$user_id]
+            ];
+        } else {
+            log_message("Failed to save settings for user {$email}", 'error');
+            return [
+                'success' => false,
+                'message' => 'Failed to save settings'
+            ];
+        }
+    } catch (\Exception $e) {
+        log_message("Error fixing customer ID for {$email}: " . $e->getMessage(), 'error');
+        return [
+            'success' => false,
+            'message' => 'Error: ' . $e->getMessage()
+        ];
+    }
+}
+
+/**
+ * Get users linked to a customer
+ *
+ * @param int $customer_id Customer ID
+ * @return array Array of linked users
+ */
+function get_users_for_customer($customer_id)
+{
+    $settings = get_settings();
+    $registered_users = $settings['registered_users'] ?? [];
+    $linked_users = [];
+
+    foreach ($registered_users as $user_id => $user_data) {
+        if (isset($user_data['parent_customer_id']) && $user_data['parent_customer_id'] == $customer_id) {
+            $linked_users[] = [
+                'id' => $user_id,
+                'name' => $user_data['name'] ?? '',
+                'email' => $user_data['email'] ?? '',
+                'first_name' => $user_data['first_name'] ?? '',
+                'last_name' => $user_data['last_name'] ?? '',
+                'company' => $user_data['company'] ?? '',
+                'registration_date' => $user_data['registration_date'] ?? '',
+                'role' => $user_data['role'] ?? 1
+            ];
+        }
+    }
+
+    return $linked_users;
+}
+
+/**
+ * Get customer ID for a user
+ *
+ * @param int $user_id User ID
+ * @return int|null Customer ID or null if not found
+ */
+function get_customer_id_for_user($user_id)
+{
+    $settings = get_settings();
+    $registered_users = $settings['registered_users'] ?? [];
+
+    if (isset($registered_users[$user_id])) {
+        return $registered_users[$user_id]['parent_customer_id'] ?? null;
+    }
+
+    return null;
+}
+
+/**
+ * Check if user is a customer
+ *
+ * @param int $user_id User ID
+ * @return bool True if user is a customer
+ */
+function is_user_customer($user_id)
+{
+    $settings = get_settings();
+    $registered_users = $settings['registered_users'] ?? [];
+
+    if (isset($registered_users[$user_id])) {
+        return ($registered_users[$user_id]['role'] ?? 0) === 2;
+    }
+
+    return false;
+}
+
+/**
+ * Check if user is a regular user (not customer)
+ *
+ * @param int $user_id User ID
+ * @return bool True if user is a regular user
+ */
+function is_user_regular_user($user_id)
+{
+    $settings = get_settings();
+    $registered_users = $settings['registered_users'] ?? [];
+
+    if (isset($registered_users[$user_id])) {
+        return ($registered_users[$user_id]['role'] ?? 0) === 1;
+    }
+
+    return false;
 }

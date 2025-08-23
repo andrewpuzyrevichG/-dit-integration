@@ -65,6 +65,34 @@ class Core
     public $logger;
 
     /**
+     * Session Manager instance
+     *
+     * @var Session_Manager
+     */
+    public $session_manager;
+
+    /**
+     * Dashboard instance
+     *
+     * @var Dashboard
+     */
+    public $dashboard;
+
+    /**
+     * Reset Password instance
+     *
+     * @var Reset_Password
+     */
+    public $reset_password;
+
+    /**
+     * Steganography instance
+     *
+     * @var Steganography
+     */
+    public $steganography;
+
+    /**
      * Get plugin instance
      *
      * @return Core
@@ -104,19 +132,9 @@ class Core
         if (is_admin()) {
             error_log('DIT Integration: Initializing admin components');
             try {
-                // Manually load Admin class if not found
+                // Admin class should be loaded by autoloader from admin/ directory
                 if (!class_exists('DIT\\Admin')) {
-                    error_log('DIT Integration: Admin class not found, trying to load manually');
-                    $admin_file = DIT_PLUGIN_DIR . 'admin/class-admin.php';
-                    error_log('DIT Integration: Looking for Admin file at: ' . $admin_file);
-                    error_log('DIT Integration: File exists: ' . (file_exists($admin_file) ? 'Yes' : 'No'));
-
-                    if (file_exists($admin_file)) {
-                        require_once $admin_file;
-                        error_log('DIT Integration: Admin file loaded manually');
-                    } else {
-                        error_log('DIT Integration: Admin file not found at: ' . $admin_file);
-                    }
+                    error_log('DIT Integration: Admin class not found after autoloader');
                 }
 
                 if (class_exists('DIT\\Admin')) {
@@ -133,53 +151,26 @@ class Core
                 error_log('DIT Integration: Exception trace: ' . $e->getTraceAsString());
             }
         } else {
-            error_log('DIT Integration: Not in admin area, skipping admin initialization');
+            error_log('DIT Integration: Not in admin area, will check admin status after Session Manager initialization');
         }
 
         // Initialize API - ensure class is loaded
         try {
-            if (!class_exists('DIT\\API')) {
-                error_log('DIT Integration: API class not found, trying to load manually');
-                $api_file = DIT_PLUGIN_DIR . 'includes/class-api.php';
-                error_log('DIT Integration: Looking for API file at: ' . $api_file);
-                error_log('DIT Integration: File exists: ' . (file_exists($api_file) ? 'Yes' : 'No'));
-
-                if (file_exists($api_file)) {
-                    error_log('DIT Integration: API file found, attempting to include');
-                    error_log('DIT Integration: File permissions: ' . decoct(fileperms($api_file)));
-                    error_log('DIT Integration: File size: ' . filesize($api_file) . ' bytes');
-                    error_log('DIT Integration: File readable: ' . (is_readable($api_file) ? 'Yes' : 'No'));
-
-                    require_once $api_file;
-                    error_log('DIT Integration: API file loaded manually');
-
-                    if (class_exists('DIT\\API')) {
-                        error_log('DIT Integration: API class exists after manual load');
-                    } else {
-                        error_log('DIT Integration: WARNING - API class still not found after manual load');
-                    }
-                } else {
-                    error_log('DIT Integration: API file not found at: ' . $api_file);
-                    // List directory contents to debug
-                    $includes_dir = DIT_PLUGIN_DIR . 'includes/';
-                    if (is_dir($includes_dir)) {
-                        $files = scandir($includes_dir);
-                        error_log('DIT Integration: Files in includes directory: ' . implode(', ', $files));
-                    } else {
-                        error_log('DIT Integration: Includes directory does not exist: ' . $includes_dir);
-                    }
-                }
+            // Always try to load API class manually first
+            $api_file = DIT_PLUGIN_DIR . 'includes/class-api.php';
+            if (file_exists($api_file)) {
+                require_once $api_file;
+                error_log('DIT Integration: API class loaded manually in Core init');
             } else {
-                error_log('DIT Integration: API class already exists');
+                error_log('DIT Integration: ERROR - API file not found: ' . $api_file);
             }
 
             if (class_exists('DIT\\API')) {
-                $this->api = new API();
+                $this->api = API::get_instance();
                 $this->api->init();
                 error_log('DIT Integration: API initialized successfully');
             } else {
-                error_log('DIT Integration: API class still not found after manual load');
-                // Don't throw exception, just log the error and continue
+                error_log('DIT Integration: ERROR - API class not found after manual load');
                 $this->api = null;
             }
         } catch (Exception $e) {
@@ -218,6 +209,32 @@ class Core
             $this->encryption = null;
         }
 
+        // Initialize Steganography - ensure class is loaded
+        try {
+            if (!class_exists('DIT\\Steganography')) {
+                error_log('DIT Integration: Steganography class not found, trying to load manually');
+                $steganography_file = DIT_PLUGIN_DIR . 'includes/class-steganography.php';
+                if (file_exists($steganography_file)) {
+                    require_once $steganography_file;
+                    error_log('DIT Integration: Steganography file loaded manually');
+                } else {
+                    error_log('DIT Integration: Steganography file not found at: ' . $steganography_file);
+                }
+            }
+
+            if (class_exists('DIT\\Steganography')) {
+                $this->steganography = new Steganography();
+                error_log('DIT Integration: Steganography initialized successfully');
+            } else {
+                error_log('DIT Integration: Steganography class still not found after manual load');
+                $this->steganography = null;
+            }
+        } catch (Exception $e) {
+            error_log('DIT Integration: Failed to initialize Steganography - ' . $e->getMessage());
+            error_log('DIT Integration: Steganography exception trace: ' . $e->getTraceAsString());
+            $this->steganography = null;
+        }
+
         // Initialize WPForms integration
         if (class_exists('DIT\\WPForms')) {
             try {
@@ -226,6 +243,32 @@ class Core
                 error_log('DIT Integration: WPForms initialized successfully');
             } catch (Exception $e) {
                 error_log('DIT Integration: Failed to initialize WPForms - ' . $e->getMessage());
+            }
+        } else {
+            error_log('DIT Integration: WPForms class not found, trying to load manually');
+
+            // Try to load WPForms class manually
+            $wpforms_file = DIT_PLUGIN_DIR . 'includes/class-wpforms.php';
+            if (file_exists($wpforms_file)) {
+                require_once $wpforms_file;
+                error_log('DIT Integration: WPForms file loaded manually');
+
+                if (class_exists('DIT\\WPForms')) {
+                    try {
+                        $this->wpforms = new WPForms();
+                        $this->wpforms->init();
+                        error_log('DIT Integration: WPForms initialized successfully after manual load');
+                    } catch (Exception $e) {
+                        error_log('DIT Integration: Failed to initialize WPForms after manual load - ' . $e->getMessage());
+                        $this->wpforms = null;
+                    }
+                } else {
+                    error_log('DIT Integration: WPForms class still not found after manual load');
+                    $this->wpforms = null;
+                }
+            } else {
+                error_log('DIT Integration: WPForms file not found at: ' . $wpforms_file);
+                $this->wpforms = null;
             }
         }
 
@@ -237,6 +280,109 @@ class Core
                 error_log('DIT Integration: Stripe initialized successfully');
             } catch (Exception $e) {
                 error_log('DIT Integration: Failed to initialize Stripe - ' . $e->getMessage());
+            }
+        }
+
+        // Initialize Session Manager
+        try {
+            if (!class_exists('DIT\\Session_Manager')) {
+                $session_manager_file = DIT_PLUGIN_DIR . 'includes/class-session-manager.php';
+                if (file_exists($session_manager_file)) {
+                    require_once $session_manager_file;
+                    error_log('DIT Integration: Session Manager file loaded manually');
+                } else {
+                    error_log('DIT Integration: Session Manager file not found at: ' . $session_manager_file);
+                }
+            }
+
+            if (class_exists('DIT\\Session_Manager')) {
+                $this->session_manager = new Session_Manager();
+                error_log('DIT Integration: Session Manager initialized successfully');
+            } else {
+                error_log('DIT Integration: Session Manager class not found after manual load');
+                $this->session_manager = null;
+            }
+        } catch (Exception $e) {
+            error_log('DIT Integration: Failed to initialize Session Manager - ' . $e->getMessage());
+            $this->session_manager = null;
+        }
+
+        // Initialize Dashboard
+        try {
+            if (!class_exists('DIT\\Dashboard')) {
+                $dashboard_file = DIT_PLUGIN_DIR . 'includes/class-dashboard.php';
+                if (file_exists($dashboard_file)) {
+                    require_once $dashboard_file;
+                    error_log('DIT Integration: Dashboard file loaded manually');
+                } else {
+                    error_log('DIT Integration: Dashboard file not found at: ' . $dashboard_file);
+                }
+            }
+
+            if (class_exists('DIT\\Dashboard')) {
+                $this->dashboard = new Dashboard();
+                $this->dashboard->init();
+                error_log('DIT Integration: Dashboard initialized successfully');
+
+                // Flush rewrite rules to ensure dashboard pages are registered
+                flush_rewrite_rules();
+                error_log('DIT Integration: Rewrite rules flushed after dashboard initialization');
+            } else {
+                error_log('DIT Integration: Dashboard class not found after manual load');
+                $this->dashboard = null;
+            }
+        } catch (Exception $e) {
+            error_log('DIT Integration: Failed to initialize Dashboard - ' . $e->getMessage());
+            $this->dashboard = null;
+        }
+
+        // Initialize Reset Password
+        try {
+            if (!class_exists('DIT\\Reset_Password')) {
+                $reset_password_file = DIT_PLUGIN_DIR . 'includes/class-reset-password.php';
+                if (file_exists($reset_password_file)) {
+                    require_once $reset_password_file;
+                    error_log('DIT Integration: Reset Password file loaded manually');
+                } else {
+                    error_log('DIT Integration: Reset Password file not found at: ' . $reset_password_file);
+                }
+            }
+
+            if (class_exists('DIT\\Reset_Password')) {
+                $this->reset_password = new Reset_Password();
+                error_log('DIT Integration: Reset Password initialized successfully');
+            } else {
+                error_log('DIT Integration: Reset Password class not found after manual load');
+                $this->reset_password = null;
+            }
+        } catch (Exception $e) {
+            error_log('DIT Integration: Failed to initialize Reset Password - ' . $e->getMessage());
+            $this->reset_password = null;
+        }
+
+        // Check if admin user is logged in on frontend and initialize admin components
+        if (!is_admin() && $this->session_manager && $this->session_manager->is_logged_in()) {
+            try {
+                $user_role = $this->session_manager->get_user_role();
+                error_log('DIT Integration: Frontend user role: ' . $user_role);
+
+                if ($user_role === 3) {
+                    error_log('DIT Integration: Admin user detected on frontend, initializing admin components');
+
+                    if (class_exists('DIT\\Admin')) {
+                        error_log('DIT Integration: Admin class found for frontend admin');
+                        $this->admin = new Admin();
+                        error_log('DIT Integration: Admin instance created for frontend');
+                        $this->admin->init();
+                        error_log('DIT Integration: Admin initialized successfully for frontend');
+                    } else {
+                        error_log('DIT Integration: Admin class not found for frontend');
+                    }
+                } else {
+                    error_log('DIT Integration: Frontend user is not admin (role: ' . $user_role . ')');
+                }
+            } catch (Exception $e) {
+                error_log('DIT Integration: Failed to check admin status or initialize Admin - ' . $e->getMessage());
             }
         }
 

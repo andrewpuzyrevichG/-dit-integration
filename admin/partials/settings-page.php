@@ -131,6 +131,61 @@ $settings = get_option('dit_settings', []);
                     </label>
                 </td>
             </tr>
+
+            <tr>
+                <th scope="row">
+                    <label for="dit_login_page_id"><?php _e('Login/Registration Page', 'dit-integration'); ?></label>
+                </th>
+                <td>
+                    <select id="dit_login_page_id" name="dit_settings[login_page_id]" class="regular-text">
+                        <option value="0"><?php _e('Select a page', 'dit-integration'); ?></option>
+                        <?php
+                        $pages = get_pages([
+                            'sort_column' => 'post_title',
+                            'sort_order' => 'asc',
+                            'post_status' => ['publish', 'private']
+                        ]);
+                        $selected = isset($settings['login_page_id']) ? (int)$settings['login_page_id'] : 0;
+                        foreach ($pages as $page) :
+                            $page_title = $page->post_title;
+                            if ($page->post_status === 'private') {
+                                $page_title .= ' (Private)';
+                            }
+                        ?>
+                            <option value="<?php echo esc_attr($page->ID); ?>" <?php selected($selected, $page->ID); ?>><?php echo esc_html($page_title); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <?php if ($selected) : ?>
+                        <p><a href="<?php echo get_permalink($selected); ?>" target="_blank"><?php _e('View page', 'dit-integration'); ?></a></p>
+                    <?php endif; ?>
+                    <p class="description"><?php _e('Select the page with your custom login/registration form (API-based).', 'dit-integration'); ?></p>
+                </td>
+            </tr>
+
+            <tr>
+                <th scope="row">
+                    <label for="dit_dashboard_page_id"><?php _e('Dashboard Page', 'dit-integration'); ?></label>
+                </th>
+                <td>
+                    <select id="dit_dashboard_page_id" name="dit_settings[dashboard_page_id]" class="regular-text">
+                        <option value="0"><?php _e('Select a page', 'dit-integration'); ?></option>
+                        <?php
+                        $selected_dashboard = isset($settings['dashboard_page_id']) ? (int)$settings['dashboard_page_id'] : 0;
+                        foreach ($pages as $page) :
+                            $page_title = $page->post_title;
+                            if ($page->post_status === 'private') {
+                                $page_title .= ' (Private)';
+                            }
+                        ?>
+                            <option value="<?php echo esc_attr($page->ID); ?>" <?php selected($selected_dashboard, $page->ID); ?>><?php echo esc_html($page_title); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <?php if ($selected_dashboard) : ?>
+                        <p><a href="<?php echo get_permalink($selected_dashboard); ?>" target="_blank"><?php _e('View page', 'dit-integration'); ?></a></p>
+                    <?php endif; ?>
+                    <p class="description"><?php _e('Select the page with the [dit_dashboard] shortcode where users will be redirected after login.', 'dit-integration'); ?></p>
+                </td>
+            </tr>
         </table>
 
         <p class="submit">
@@ -138,6 +193,26 @@ $settings = get_option('dit_settings', []);
                 value="<?php esc_attr_e('Save Settings', 'dit-integration'); ?>">
             <button type="button" id="dit-test-api"
                 class="button"><?php _e('Test API Connection', 'dit-integration'); ?></button>
+        </p>
+
+        <hr style="margin: 30px 0;">
+
+        <h2><?php _e('Troubleshooting Tools', 'dit-integration'); ?></h2>
+        <p><?php _e('Use these tools to diagnose and fix issues with login and dashboard redirects.', 'dit-integration'); ?></p>
+
+        <p>
+            <a href="<?php echo admin_url('admin.php?page=dit-integration&action=fix-dashboard'); ?>"
+                class="button button-secondary">
+                <?php _e('Fix Dashboard Redirect', 'dit-integration'); ?>
+            </a>
+            <a href="<?php echo admin_url('admin.php?page=dit-integration&action=test-login'); ?>"
+                class="button button-secondary">
+                <?php _e('Test Login & Redirect', 'dit-integration'); ?>
+            </a>
+            <a href="<?php echo admin_url('admin.php?page=dit-integration&action=migrate-dashboard'); ?>"
+                class="button button-secondary">
+                <?php _e('Setup Dashboard Page', 'dit-integration'); ?>
+            </a>
         </p>
     </form>
 </div>

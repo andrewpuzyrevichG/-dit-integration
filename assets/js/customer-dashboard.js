@@ -114,6 +114,10 @@
         loadUsers: function () {
             var self = this;
 
+            // Log the call to track duplicates
+            console.log('🚨 DIT Dashboard: loadUsers() called at:', new Date().toISOString());
+            console.log('🚨 DIT Dashboard: Call stack:', new Error().stack);
+
             $('#users-loading').show();
             $('#users-container').hide();
 
@@ -186,7 +190,28 @@
                 data: ajaxData,
                 success: function (response) {
                     $('#users-loading').hide();
-                    console.log('DIT Dashboard: AJAX response:', response);
+                    console.log('🚨 DIT Dashboard: AJAX response received at:', new Date().toISOString());
+                    console.log('🚨 DIT Dashboard: Full AJAX response:', response);
+                    console.log('🚨 DIT Dashboard: Response type:', typeof response);
+                    console.log('🚨 DIT Dashboard: Response success:', response.success);
+                    console.log('🚨 DIT Dashboard: Response data:', response.data);
+                    console.log('🚨 DIT Dashboard: Response data type:', typeof response.data);
+                    console.log('🚨 DIT Dashboard: Response data length:', response.data ? response.data.length : 'null');
+
+                    // Log detailed data structure
+                    if (response.data && Array.isArray(response.data)) {
+                        console.log('🚨 DIT Dashboard: Data is array, analyzing each user:');
+                        response.data.forEach(function (user, index) {
+                            console.log('🚨 DIT Dashboard: User ' + index + ':', {
+                                id: user.Id || user.id,
+                                email: user.Email || user.email,
+                                firstName: user.NameFirst || user.first_name,
+                                lastName: user.NameLast || user.last_name,
+                                tools: user.Tools || user.tools,
+                                fullObject: user
+                            });
+                        });
+                    }
 
                     if (response.success) {
                         // Update sync indicator to show success
@@ -195,6 +220,8 @@
                             $('.sync-indicator').fadeOut();
                         }, 2000);
 
+                        // DEBUG: Log the data before passing to renderUsers
+                        console.log('🚨 DIT Dashboard: About to call renderUsers with:', response.data);
                         self.renderUsers(response.data);
                     } else {
                         // Show sync error
@@ -227,6 +254,12 @@
         renderUsers: function (users) {
             var container = $('#users-container');
 
+            // DEBUG: Log the users data structure
+            console.log('🚨 DIT Dashboard: renderUsers() called at:', new Date().toISOString());
+            console.log('🚨 DIT Dashboard: renderUsers called with data:', users);
+            console.log('🚨 DIT Dashboard: users type:', typeof users);
+            console.log('🚨 DIT Dashboard: users length:', users ? users.length : 'null');
+
             if (!users || users.length === 0) {
                 container.html('<p class="no-users">No users found. Add your first user to get started.</p>').show();
                 return;
@@ -237,24 +270,54 @@
             html += '<thead><tr><th>Name</th><th>Email</th><th>Tools Access</th><th>Status</th><th>Actions</th></tr></thead>';
             html += '<tbody>';
 
-            users.forEach(function (user) {
-                var fullName = (user.first_name || '') + ' ' + (user.last_name || '');
+            users.forEach(function (user, index) {
+                // DEBUG: Log each user object
+                console.log('🚨 DIT Dashboard: Processing user ' + index + ' at:', new Date().toISOString());
+                console.log('🚨 DIT Dashboard: User ' + index + ' full object:', user);
+                console.log('🚨 DIT Dashboard: User ' + index + ' keys:', Object.keys(user));
+
+                // Map API fields to expected fields
+                var userId = user.Id || user.id || 'unknown';
+                var firstName = user.NameFirst || user.first_name || '';
+                var lastName = user.NameLast || user.last_name || '';
+                var email = user.Email || user.email || 'undefined';
+                var tools = user.Tools || user.tools || [];
+                var isActive = user.active !== undefined ? user.active : true; // Default to active if not specified
+
+                console.log('🚨 DIT Dashboard: User ' + index + ' mapped fields:', {
+                    userId: userId,
+                    firstName: firstName,
+                    lastName: lastName,
+                    email: email,
+                    tools: tools,
+                    isActive: isActive
+                });
+
+                var fullName = firstName + ' ' + lastName;
                 fullName = fullName.trim() || 'N/A';
 
-                html += '<tr data-user-id="' + user.id + '">';
+                // DEBUG: Log the constructed name
+                console.log('🚨 DIT Dashboard: User ' + index + ' constructed fullName:', fullName);
+
+                html += '<tr data-user-id="' + userId + '">';
                 html += '<td>' + fullName + '</td>';
-                html += '<td>' + user.email + '</td>';
-                html += '<td>' + (user.tools ? user.tools.join(', ') : 'All tools') + '</td>';
-                html += '<td><span class="status-badge ' + (user.active ? 'active' : 'inactive') + '">' + (user.active ? 'Active' : 'Inactive') + '</span></td>';
+                html += '<td>' + email + '</td>';
+                html += '<td>' + (tools && Array.isArray(tools) && tools.length > 0 ? tools.join(', ') : 'All tools') + '</td>';
+                html += '<td><span class="status-badge ' + (isActive ? 'active' : 'inactive') + '">' + (isActive ? 'Active' : 'Inactive') + '</span></td>';
                 html += '<td>';
-                html += '<button class="btn-small btn-edit" onclick="DITDashboard.editUser(' + user.id + ')">Edit</button>';
-                html += '<button class="btn-small btn-danger" onclick="DITDashboard.deleteUserConfirm(' + user.id + ', \'' + fullName + '\')">Delete</button>';
+                html += '<button class="btn-small btn-edit" onclick="DITDashboard.editUser(' + userId + ')">Edit</button>';
+                html += '<button class="btn-small btn-danger" onclick="DITDashboard.deleteUserConfirm(' + userId + ', \'' + fullName + '\')">Delete</button>';
                 html += '</td>';
                 html += '</tr>';
             });
 
             html += '</tbody></table></div>';
             container.html(html).show();
+
+            // DEBUG: Log the final HTML
+            console.log('🚨 DIT Dashboard: renderUsers completed at:', new Date().toISOString());
+            console.log('🚨 DIT Dashboard: Final HTML generated (length):', html.length);
+            console.log('🚨 DIT Dashboard: Container updated, users displayed');
         },
 
         // Show add user modal
@@ -282,15 +345,20 @@
         // Populate edit form with user data
         populateEditForm: function (userData) {
             console.log('DIT Dashboard: Populating form with user data:', userData);
-            console.log('DIT Dashboard: userData.email:', userData.email);
-            console.log('DIT Dashboard: userData.first_name:', userData.first_name);
-            console.log('DIT Dashboard: userData.last_name:', userData.last_name);
-            console.log('DIT Dashboard: userData.id:', userData.id);
+
+            // Map API fields to expected fields
+            var userId = userData.Id || userData.id || userData.userId;
+            var email = userData.Email || userData.email || '';
+            var firstName = userData.NameFirst || userData.first_name || userData.nameFirst || '';
+            var lastName = userData.NameLast || userData.last_name || userData.nameLast || '';
+            var tools = userData.Tools || userData.tools || [];
+
+            console.log('DIT Dashboard: Mapped fields - userId:', userId, 'email:', email, 'firstName:', firstName, 'lastName:', lastName);
 
             // Set form values
-            $('#user_email').val(userData.email || '');
-            $('#user_first_name').val(userData.first_name || userData.nameFirst || '');
-            $('#user_last_name').val(userData.last_name || userData.nameLast || '');
+            $('#user_email').val(email);
+            $('#user_first_name').val(firstName);
+            $('#user_last_name').val(lastName);
 
             console.log('DIT Dashboard: Form field values after setting:');
             console.log('DIT Dashboard: #user_email.val():', $('#user_email').val());
@@ -303,14 +371,14 @@
             // Set tools checkboxes
             $('.checkbox-group input[type="checkbox"]').prop('checked', false);
 
-            if (userData.tools && Array.isArray(userData.tools)) {
-                userData.tools.forEach(function (toolId) {
+            if (tools && Array.isArray(tools)) {
+                tools.forEach(function (toolId) {
                     $('.checkbox-group input[value="' + toolId + '"]').prop('checked', true);
                 });
             }
 
             // Store user ID for update
-            this.selectedUserId = userData.id || userData.userId;
+            this.selectedUserId = userId;
             $('#edit_user_id').val(this.selectedUserId);
 
             console.log('DIT Dashboard: Form populated, selected user ID:', this.selectedUserId);
@@ -420,6 +488,14 @@
 
         // Add new user
         addUser: function () {
+            // ANTI-DUPLICATE PROTECTION: Prevent multiple simultaneous requests
+            if (this.isAddingUser) {
+                console.log('DIT Dashboard: User addition already in progress, ignoring duplicate request');
+                return;
+            }
+
+            this.isAddingUser = true;
+
             var form = $('#add-user-form')[0];
             var formData = new FormData(form);
 
@@ -479,6 +555,9 @@
                 success: function (response) {
                     $btn.removeClass('loading').text(originalText);
 
+                    // ANTI-DUPLICATE CLEANUP: Reset flag
+                    self.isAddingUser = false;
+
                     console.log('DIT Dashboard: AJAX response received:', {
                         success: response.success,
                         data: response.data,
@@ -497,6 +576,10 @@
                 },
                 error: function (xhr, status, error) {
                     $btn.removeClass('loading').text(originalText);
+
+                    // ANTI-DUPLICATE CLEANUP: Reset flag on error
+                    self.isAddingUser = false;
+
                     console.log('DIT Dashboard: AJAX error:', {
                         status: status,
                         error: error,

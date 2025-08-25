@@ -22,7 +22,7 @@ class Stripe
         // For example, we could verify Stripe API keys are set
         $settings = get_option('dit_settings');
         if (empty($settings['stripe_secret_key']) || empty($settings['stripe_publishable_key'])) {
-            error_log('DIT Integration: Stripe API keys are not configured');
+            // Stripe API keys are not configured
         }
     }
 

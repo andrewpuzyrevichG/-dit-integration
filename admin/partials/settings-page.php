@@ -18,6 +18,37 @@ $settings = get_option('dit_settings', []);
 <div class="wrap dit-settings-wrap">
     <h1><?php echo esc_html(get_admin_page_title()); ?></h1>
 
+    <!-- API Configuration Section -->
+    <h3><?php _e('API Configuration', 'dit-integration'); ?></h3>
+    <table class="form-table">
+        <tr>
+            <th scope="row">
+                <label for="dit_api_url"><?php _e('API Base URL', 'dit-integration'); ?></label>
+            </th>
+            <td>
+                <input type="url" id="dit_api_url" name="dit_settings[dit_api_url]"
+                    value="<?php echo esc_attr($settings['dit_api_url'] ?? 'https://api.dataintegritytool.org:5001'); ?>"
+                    class="regular-text" />
+                <p class="description">
+                    <?php _e('Base URL for DIT API (e.g., https://api.dataintegritytool.org:5001)', 'dit-integration'); ?>
+                </p>
+            </td>
+        </tr>
+        <tr>
+            <th scope="row">
+                <label for="dit_api_key"><?php _e('API Key', 'dit-integration'); ?></label>
+            </th>
+            <td>
+                <input type="text" id="dit_api_key" name="dit_settings[dit_api_key]"
+                    value="<?php echo esc_attr($settings['dit_api_key'] ?? ''); ?>"
+                    class="regular-text" />
+                <p class="description">
+                    <?php _e('API key for authentication (if required)', 'dit-integration'); ?>
+                </p>
+            </td>
+        </tr>
+    </table>
+
     <form id="dit-settings-form" method="post">
         <table class="form-table">
             <tr>

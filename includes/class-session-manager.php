@@ -242,6 +242,9 @@ class Session_Manager
                 'user_id' => $user_id,
                 'customer_id' => $customer_id,
                 'email' => $user_data['email'],
+                'first_name' => $user_data['first_name'] ?? '',
+                'last_name' => $user_data['last_name'] ?? '',
+                'company' => $user_data['company'] ?? '',
                 'role' => $role,
                 'aes_key' => $aes_key,
                 'session_id' => $session_result['SessionId'] ?? null,
@@ -264,6 +267,19 @@ class Session_Manager
                     'note' => 'AES key after storing in session_data'
                 ], 'info', 'AES key details after storing in session_data (length: ' . strlen($this->session_data['aes_key']) . ' chars)');
             }
+
+            // Log user data details after storing in session data
+            $logger->log_api_interaction('Session Manager', [
+                'email' => $user_data['email'],
+                'customer_id' => $customer_id,
+                'step' => 'user_data_stored',
+                'first_name' => $this->session_data['first_name'],
+                'last_name' => $this->session_data['last_name'],
+                'company' => $this->session_data['company'],
+                'user_data_keys' => array_keys($user_data),
+                'session_data_keys' => array_keys($this->session_data),
+                'note' => 'User data stored in session_data'
+            ], 'info', 'User data stored in session_data for customer ' . $customer_id);
 
             // Store in PHP session
             $_SESSION['dit_user_session'] = $this->session_data;

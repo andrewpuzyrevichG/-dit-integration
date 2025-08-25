@@ -55,10 +55,10 @@ class WPForms
                 error_log('DIT WPForms: ERROR - Failed to register wpforms_process hook: ' . $e->getMessage());
             }
 
-            // Hook to process checkbox values
+            // Hook to process checkbox values (changed to wpforms_process to avoid duplicate wpforms_process_complete)
             try {
-                add_action('wpforms_process_complete', [$this, 'process_checkbox_values'], 5, 4);
-                error_log('DIT WPForms: process_checkbox_values hook registered successfully');
+                add_action('wpforms_process', [$this, 'process_checkbox_values'], 5, 3);
+                error_log('DIT WPForms: process_checkbox_values hook registered successfully (wpforms_process)');
             } catch (Exception $e) {
                 error_log('DIT WPForms: ERROR - Failed to register process_checkbox_values hook: ' . $e->getMessage());
             }
@@ -201,7 +201,18 @@ class WPForms
      */
     private function process_signup_form($user_data, $entry_id)
     {
-        error_log('DIT WPForms: Processing signup form for email: ' . $user_data['email']);
+        // ANTI-DUPLICATE PROTECTION: Prevent multiple simultaneous processing of the same email
+        static $processing_emails = [];
+        $email = $user_data['email'] ?? '';
+
+        if (in_array($email, $processing_emails)) {
+            error_log('DIT WPForms: DUPLICATE REQUEST PREVENTED for email: ' . $email);
+            return; // Stop processing duplicate
+        }
+
+        $processing_emails[] = $email;
+
+        error_log('DIT WPForms: Processing signup form for email: ' . $email);
 
         try {
             // Step 1: Register customer with DIT API
@@ -234,6 +245,12 @@ class WPForms
             error_log('DIT WPForms: Signup process completed successfully for customer ID: ' . $customer_id);
         } catch (Exception $e) {
             error_log('DIT WPForms: ERROR during signup processing: ' . $e->getMessage());
+        } finally {
+            // ANTI-DUPLICATE CLEANUP: Remove email from processing array
+            $key = array_search($email, $processing_emails);
+            if ($key !== false) {
+                unset($processing_emails[$key]);
+            }
         }
     }
 
@@ -355,7 +372,6 @@ class WPForms
                 'error',
                 'API class not available - registration cannot proceed'
             );
-            error_log('DIT Integration: API class not available for form processing');
             return false;
         }
 
@@ -387,7 +403,6 @@ class WPForms
                         'error',
                         'Could not extract user data from signup form submission'
                     );
-                    error_log('DIT Integration: Could not extract user data from signup form submission');
                     return false;
                 }
 
@@ -452,7 +467,6 @@ class WPForms
                         'error',
                         'Customer registration failed - API returned null'
                     );
-                    error_log('DIT Integration: Customer registration failed');
                     return false;
                 }
 
@@ -618,7 +632,6 @@ class WPForms
                         'error',
                         'Could not extract user data from signin form submission'
                     );
-                    error_log('DIT Integration: Could not extract user data from signin form submission');
                     return false;
                 }
 
@@ -755,7 +768,6 @@ class WPForms
                     } else {
                         // Show user-friendly error message
                         $this->show_access_denied_message($form_data['id'], 'У вас немає прав для доступу до цієї сторінки. Зверніться до адміністратора для отримання доступу.');
-                        error_log('DIT Integration: No roles found for this email');
                         return false;
                     }
                 }
@@ -807,7 +819,6 @@ class WPForms
                                 'error',
                                 'Role not selected or invalid for this email'
                             );
-                            error_log('DIT Integration: Role not selected or invalid');
                             return false;
                         }
                     }
@@ -877,7 +888,6 @@ class WPForms
                         'error',
                         'WebLogin API failed - API returned null'
                     );
-                    error_log('DIT Integration: WebLogin API failed');
                     return false;
                 }
 
@@ -899,7 +909,6 @@ class WPForms
                         'error',
                         'WebLogin API failed with error code: ' . $login_result['errorcode'] . ' - ' . ($login_result['errormessage'] ?? 'No error message')
                     );
-                    error_log('DIT Integration: WebLogin API failed with error code: ' . $login_result['errorcode']);
                     return false;
                 }
 
@@ -1167,7 +1176,6 @@ class WPForms
                 'error',
                 'Exception during form processing'
             );
-            error_log('DIT Integration: Exception during form processing - ' . $e->getMessage());
             return false;
         }
     }

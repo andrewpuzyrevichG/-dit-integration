@@ -53,16 +53,9 @@ class Reset_Password
             // Get user/customer data by email
             $api = API::get_instance();
 
-            // Log the email being searched
-            error_log('DIT Integration: Searching for email: ' . $email);
-
             $login_roles = $api->get_login_roles_for_email($email);
 
-            // Log the response
-            error_log('DIT Integration: Login roles response: ' . json_encode($login_roles));
-
             if (!$login_roles) {
-                error_log('DIT Integration: Email not found in login roles');
                 wp_send_json_error('Email not found');
                 return;
             }
@@ -70,7 +63,6 @@ class Reset_Password
             // Use the first available role (customer or user)
             // $login_roles is an array of IDs, we need to determine the type
             if (empty($login_roles)) {
-                error_log('DIT Integration: No login roles found for email: ' . $email);
                 wp_send_json_error('User not found');
                 return;
             }
@@ -80,35 +72,24 @@ class Reset_Password
             $primary_key = $login_roles[0] ?? 0;
             $login_type = 2; // Assume customer for now
 
-            error_log('DIT Integration: Using primary_key: ' . $primary_key . ', login_type: ' . $login_type);
-
             if (!$primary_key) {
-                error_log('DIT Integration: No valid primary key found');
                 wp_send_json_error('User not found');
                 return;
             }
 
             // Try to get AES key for this customer
             $aes_key = $api->get_user_permanent_aes_key($primary_key);
-            error_log('DIT Integration: AES key for customer ' . $primary_key . ': ' . ($aes_key ? 'found' : 'not found'));
 
             // If no AES key found, try to get it from API
             if (!$aes_key) {
-                error_log('DIT Integration: Trying to get AES key from API for customer ' . $primary_key);
                 // Try to get AES key via API call
                 $aes_key = $api->get_user_permanent_aes_key($primary_key);
-                error_log('DIT Integration: AES key from API for customer ' . $primary_key . ': ' . ($aes_key ? 'found' : 'not found'));
             }
 
             // Request password reset token
-            error_log('DIT Integration: Calling change_password_ask with primary_key: ' . $primary_key . ', login_type: ' . $login_type);
-
             $response = $api->change_password_ask($primary_key, $login_type);
 
-            error_log('DIT Integration: change_password_ask response: ' . json_encode($response));
-
             if (!$response) {
-                error_log('DIT Integration: change_password_ask returned null');
                 wp_send_json_error('Failed to request password reset');
                 return;
             }
@@ -149,7 +130,6 @@ class Reset_Password
                 'email' => $email
             ]);
         } catch (\Exception $e) {
-            error_log('DIT Integration: Password reset request failed - ' . $e->getMessage());
             wp_send_json_error('An error occurred while processing your request');
         }
     }
@@ -264,7 +244,6 @@ class Reset_Password
                 'message' => 'Password reset successfully'
             ]);
         } catch (\Exception $e) {
-            error_log('DIT Integration: Password reset submission failed - ' . $e->getMessage());
             wp_send_json_error('An error occurred while resetting your password');
         }
     }

@@ -14,9 +14,28 @@ if (!defined('ABSPATH')) {
 $session_data = $this->session_manager->get_session_data();
 $customer_id = $session_data['customer_id'] ?? null;
 $email = $session_data['email'] ?? '';
+
+// Get user data from session with fallback to local data
 $first_name = $session_data['first_name'] ?? '';
 $last_name = $session_data['last_name'] ?? '';
 $company = $session_data['company'] ?? '';
+
+// If session data is missing, try to get from local storage
+if (empty($first_name) || empty($last_name)) {
+    $local_first_name = \DIT\get_user_first_name($customer_id);
+    $local_last_name = \DIT\get_user_last_name($customer_id);
+    $local_company = \DIT\get_user_company($customer_id);
+
+    $first_name = $first_name ?: $local_first_name ?: '';
+    $last_name = $last_name ?: $local_last_name ?: '';
+    $company = $company ?: $local_company ?: '';
+
+    // Log fallback data retrieval
+    error_log('DIT Dashboard: Using fallback data for customer ' . $customer_id .
+        ' - First Name: ' . ($first_name ?: 'NOT FOUND') .
+        ', Last Name: ' . ($last_name ?: 'NOT FOUND') .
+        ', Company: ' . ($company ?: 'NOT FOUND'));
+}
 
 // Check if this is being loaded as a shortcode
 $is_shortcode = !defined('DIT_IS_FULL_PAGE');

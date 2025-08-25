@@ -33,9 +33,7 @@ function get_setting($key, $default = '')
  */
 function log_message($message, $level = 'info')
 {
-    if (defined('WP_DEBUG') && WP_DEBUG) {
-        error_log(sprintf('[DIT Integration] [%s] %s', strtoupper($level), $message));
-    }
+    // Log message function
 }
 
 /**
@@ -257,93 +255,108 @@ function get_user_permanent_aes_key($customer_id)
 
     error_log('DIT Helpers: === GET USER PERMANENT AES KEY ===');
     error_log('DIT Helpers: Customer ID: ' . ($customer_id ?? 'NULL'));
+    error_log('DIT Helpers: Session ID: ' . session_id());
+    error_log('DIT Helpers: Session status: ' . (session_status() === PHP_SESSION_ACTIVE ? 'Active' : 'Inactive'));
+    error_log('DIT Helpers: Session data keys: ' . (isset($_SESSION) ? implode(', ', array_keys($_SESSION)) : 'No session data'));
+    error_log('DIT Helpers: dit_aes_keys exists: ' . (isset($_SESSION['dit_aes_keys']) ? 'Yes' : 'No'));
+    if (isset($_SESSION['dit_aes_keys'])) {
+        error_log('DIT Helpers: dit_aes_keys count: ' . count($_SESSION['dit_aes_keys']));
+        error_log('DIT Helpers: dit_aes_keys keys: ' . implode(', ', array_keys($_SESSION['dit_aes_keys'])));
+        if (isset($_SESSION['dit_aes_keys'][$customer_id])) {
+            $key = $_SESSION['dit_aes_keys'][$customer_id];
+            error_log('DIT Helpers: Found key in dit_aes_keys[' . $customer_id . '] - length: ' . strlen($key) . ', type: ' . (ctype_xdigit($key) ? 'hex' : 'binary'));
+        } else {
+            error_log('DIT Helpers: No key found in dit_aes_keys[' . $customer_id . ']');
+        }
+    }
+    error_log('DIT Helpers: login_aes_key exists: ' . (isset($_SESSION['login_aes_key']) ? 'Yes' : 'No'));
+    if (isset($_SESSION['login_aes_key'])) {
+        $login_key = $_SESSION['login_aes_key'];
+        error_log('DIT Helpers: login_aes_key length: ' . strlen($login_key) . ', type: ' . (ctype_xdigit($login_key) ? 'hex' : 'binary'));
+    }
+    error_log('DIT Helpers: Note: Cookies removed - AES keys stored only in session');
+    error_log('DIT Helpers: Priority structure: 1) dit_aes_keys[customer_id], 2) login_aes_key (legacy)');
 
     // ПРІОРИТЕТ 1: Перевіряємо dit_aes_keys[customer_id] - оригінальний AES ключ
+    error_log('DIT Helpers: - Checking PRIORITY 1: dit_aes_keys[' . $customer_id . ']');
     if ($customer_id && isset($_SESSION['dit_aes_keys'][$customer_id])) {
         $aes_key = $_SESSION['dit_aes_keys'][$customer_id];
+        error_log('DIT Helpers: - PRIORITY 1: Key found in dit_aes_keys[' . $customer_id . ']');
 
         // Перевіряємо, чи це оригінальний AES ключ (32 байти) або стеганографічний (128 символів)
         if (strlen($aes_key) === 32) {
-            error_log('DIT Helpers: - Found original AES key in dit_aes_keys[' . $customer_id . ']');
-            error_log('DIT Helpers: - Key length: ' . strlen($aes_key) . ' bytes (original AES key)');
-            error_log('DIT Helpers: - Key preview: ' . bin2hex(substr($aes_key, 0, 8)) . '...');
+            error_log('DIT Helpers: - PRIORITY 1: Found original AES key in dit_aes_keys[' . $customer_id . ']');
+            error_log('DIT Helpers: - PRIORITY 1: Key length: ' . strlen($aes_key) . ' bytes (original AES key)');
+            error_log('DIT Helpers: - PRIORITY 1: Key preview: ' . bin2hex(substr($aes_key, 0, 8)) . '...');
+            error_log('DIT Helpers: - PRIORITY 1: Returning original AES key');
 
             // ВАЖЛИВО: Повертаємо оригінальний AES ключ (32 байти)
             return $aes_key;
         } elseif (ctype_xdigit($aes_key) && strlen($aes_key) === 128) {
-            error_log('DIT Helpers: - WARNING: Found steganography key in dit_aes_keys[' . $customer_id . ']');
-            error_log('DIT Helpers: - Key length: ' . strlen($aes_key) . ' chars (steganography format)');
-            error_log('DIT Helpers: - This should be the original AES key, not steganography key');
+            error_log('DIT Helpers: - PRIORITY 1: WARNING: Found steganography key in dit_aes_keys[' . $customer_id . ']');
+            error_log('DIT Helpers: - PRIORITY 1: Key length: ' . strlen($aes_key) . ' chars (steganography format)');
+            error_log('DIT Helpers: - PRIORITY 1: This should be the original AES key, not steganography key');
 
             // Конвертуємо стеганографічний ключ в оригінальний AES ключ
+            error_log('DIT Helpers: - PRIORITY 1: Converting steganography key to original AES key');
             $steganography = new \DIT\Steganography();
             $original_aes_key = $steganography->extract_aes_key_from_steganography($aes_key);
             if ($original_aes_key) {
-                error_log('DIT Helpers: - Converted steganography key to original AES key');
-                error_log('DIT Helpers: - Converted key length: ' . strlen($original_aes_key) . ' bytes');
+                error_log('DIT Helpers: - PRIORITY 1: Converted steganography key to original AES key');
+                error_log('DIT Helpers: - PRIORITY 1: Converted key length: ' . strlen($original_aes_key) . ' bytes');
+                error_log('DIT Helpers: - PRIORITY 1: Returning converted key');
                 return $original_aes_key;
+            } else {
+                error_log('DIT Helpers: - PRIORITY 1: Failed to convert steganography key');
             }
         } else {
-            error_log('DIT Helpers: - WARNING: Key in dit_aes_keys[' . $customer_id . '] has unknown format');
-            error_log('DIT Helpers: - Key length: ' . strlen($aes_key) . ' chars');
-            error_log('DIT Helpers: - Key type: ' . (ctype_xdigit($aes_key) ? 'hex' : 'binary'));
+            error_log('DIT Helpers: - PRIORITY 1: WARNING: Key in dit_aes_keys[' . $customer_id . '] has unknown format');
+            error_log('DIT Helpers: - PRIORITY 1: Key length: ' . strlen($aes_key) . ' chars');
+            error_log('DIT Helpers: - PRIORITY 1: Key type: ' . (ctype_xdigit($aes_key) ? 'hex' : 'binary'));
         }
+    } else {
+        error_log('DIT Helpers: - PRIORITY 1: No key found in dit_aes_keys[' . $customer_id . ']');
     }
 
-    // ПРІОРИТЕТ 2: Перевіряємо cookies
-    if ($customer_id && isset($_COOKIE['dit_aes_key_' . $customer_id])) {
-        $cookie_key = $_COOKIE['dit_aes_key_' . $customer_id];
-
-        // Перевіряємо, чи це base64-кодований оригінальний AES ключ
-        if (strlen($cookie_key) === 44) { // base64(32 bytes) = 44 chars
-            $decoded_key = base64_decode($cookie_key, true);
-            if ($decoded_key !== false && strlen($decoded_key) === 32) {
-                error_log('DIT Helpers: - Found original AES key in cookies for customer_id ' . $customer_id);
-                error_log('DIT Helpers: - Key length: ' . strlen($decoded_key) . ' bytes (decoded from base64)');
-                return $decoded_key;
-            }
-        }
-
-        // Перевіряємо, чи це стеганографічний ключ
-        if (ctype_xdigit($cookie_key) && strlen($cookie_key) === 128) {
-            error_log('DIT Helpers: - Found steganography key in cookies for customer_id ' . $customer_id);
-            error_log('DIT Helpers: - Converting steganography key to original AES key');
-
-            $steganography = new \DIT\Steganography();
-            $original_aes_key = $steganography->extract_aes_key_from_steganography($cookie_key);
-            if ($original_aes_key) {
-                error_log('DIT Helpers: - Converted steganography key to original AES key');
-                error_log('DIT Helpers: - Converted key length: ' . strlen($original_aes_key) . ' bytes');
-                return $original_aes_key;
-            }
-        }
-    }
+    // ПРІОРИТЕТ 2: Cookies видалені - AES ключі зберігаються тільки в сесії
+    error_log('DIT Helpers: - PRIORITY 2: Cookies removed - AES keys stored only in session');
 
     // ПРІОРИТЕТ 3: Legacy fallback - login_aes_key
+    error_log('DIT Helpers: - Checking PRIORITY 3: login_aes_key (legacy fallback)');
     if (isset($_SESSION['login_aes_key'])) {
         $base64_key = $_SESSION['login_aes_key'];
+        error_log('DIT Helpers: - PRIORITY 3: login_aes_key found in session');
+        error_log('DIT Helpers: - PRIORITY 3: login_aes_key length: ' . strlen($base64_key) . ' chars');
+
         $binary_key = base64_decode($base64_key, true);
 
         if ($binary_key !== false && strlen($binary_key) === 32) {
-            error_log('DIT Helpers: - Found original AES key in login_aes_key (legacy)');
-            error_log('DIT Helpers: - Key length: ' . strlen($binary_key) . ' bytes');
+            error_log('DIT Helpers: - PRIORITY 3: Found original AES key in login_aes_key (legacy)');
+            error_log('DIT Helpers: - PRIORITY 3: Key length: ' . strlen($binary_key) . ' bytes');
+            error_log('DIT Helpers: - PRIORITY 3: Returning decoded key from login_aes_key');
             return $binary_key;
+        } else {
+            error_log('DIT Helpers: - PRIORITY 3: Failed to decode login_aes_key or wrong length');
+            if ($binary_key === false) {
+                error_log('DIT Helpers: - PRIORITY 3: base64_decode failed');
+            } else {
+                error_log('DIT Helpers: - PRIORITY 3: Decoded key length: ' . strlen($binary_key) . ' (expected 32)');
+            }
         }
+    } else {
+        error_log('DIT Helpers: - PRIORITY 3: No login_aes_key found in session');
     }
 
-    // ПРІОРИТЕТ 4: Legacy fallback - cookies
-    if (isset($_COOKIE['dit_login_aes_key'])) {
-        $base64_key = $_COOKIE['dit_login_aes_key'];
-        $binary_key = base64_decode($base64_key, true);
-
-        if ($binary_key !== false && strlen($binary_key) === 32) {
-            error_log('DIT Helpers: - Found original AES key in dit_login_aes_key cookie (legacy)');
-            error_log('DIT Helpers: - Key length: ' . strlen($binary_key) . ' bytes');
-            return $binary_key;
-        }
-    }
+    // ПРІОРИТЕТ 4: Cookies видалені - AES ключі зберігаються тільки в сесії
+    error_log('DIT Helpers: - PRIORITY 4: Cookies removed - AES keys stored only in session');
 
     error_log('DIT Helpers: - No valid AES key found for customer_id ' . $customer_id);
+    error_log('DIT Helpers: - All priorities checked - no key found');
+    error_log('DIT Helpers: - Final priority structure:');
+    error_log('DIT Helpers:   - PRIORITY 1: dit_aes_keys[customer_id] (session)');
+    error_log('DIT Helpers:   - PRIORITY 2: Cookies (removed)');
+    error_log('DIT Helpers:   - PRIORITY 3: login_aes_key (session, legacy)');
+    error_log('DIT Helpers:   - PRIORITY 4: Cookies (removed)');
     error_log('DIT Helpers: === GET USER PERMANENT AES KEY COMPLETE ===');
     return null;
 }
@@ -531,37 +544,14 @@ function get_customer_id_from_cookies()
  */
 function get_aes_key_from_cookies($customer_id = null)
 {
-    error_log('DIT Integration: get_aes_key_from_cookies called with customer_id: ' . ($customer_id ?? 'null'));
-
-    // Log all DIT cookies for debugging
-    $dit_cookies = [];
-    foreach ($_COOKIE as $name => $value) {
-        if (strpos($name, 'dit_') === 0) {
-            $dit_cookies[$name] = substr($value, 0, 20) . '...'; // Truncate for security
-        }
-    }
-    error_log('DIT Integration: Available DIT cookies: ' . json_encode($dit_cookies));
-
     if ($customer_id === null && isset($_COOKIE['dit_customer_id'])) {
         $customer_id = $_COOKIE['dit_customer_id'];
-        error_log('DIT Integration: Using customer_id from cookie: ' . $customer_id);
     }
 
     // Try new format first (dit_aes_key_123)
     if ($customer_id && isset($_COOKIE['dit_aes_key_' . $customer_id])) {
         $base64_key = $_COOKIE['dit_aes_key_' . $customer_id];
         $binary_key = base64_decode($base64_key);
-        error_log('DIT Integration: Found AES key in new format cookies for customer_id ' . $customer_id);
-        error_log('DIT Integration: Base64 key length: ' . strlen($base64_key));
-        error_log('DIT Integration: Binary key length: ' . strlen($binary_key));
-
-        // Add key hash for comparison and debugging
-        error_log('DIT Integration: New Format Cookie Key Hash Analysis:');
-        error_log('DIT Integration: - Base64 key MD5 hash: ' . md5($base64_key));
-        error_log('DIT Integration: - Binary key MD5 hash: ' . md5($binary_key));
-        error_log('DIT Integration: - Binary key SHA256 hash: ' . hash('sha256', $binary_key));
-        error_log('DIT Integration: - Binary key hex representation: ' . bin2hex($binary_key));
-
         return $binary_key;
     }
 
@@ -569,21 +559,9 @@ function get_aes_key_from_cookies($customer_id = null)
     if (isset($_COOKIE['dit_aes_key'])) {
         $base64_key = $_COOKIE['dit_aes_key'];
         $binary_key = base64_decode($base64_key);
-        error_log('DIT Integration: Found AES key in old format cookies');
-        error_log('DIT Integration: Base64 key length: ' . strlen($base64_key));
-        error_log('DIT Integration: Binary key length: ' . strlen($binary_key));
-
-        // Add key hash for comparison and debugging
-        error_log('DIT Integration: Old Format Cookie Key Hash Analysis:');
-        error_log('DIT Integration: - Base64 key MD5 hash: ' . md5($base64_key));
-        error_log('DIT Integration: - Binary key MD5 hash: ' . md5($binary_key));
-        error_log('DIT Integration: - Binary key SHA256 hash: ' . hash('sha256', $binary_key));
-        error_log('DIT Integration: - Binary key hex representation: ' . bin2hex($binary_key));
-
         return $binary_key;
     }
 
-    error_log('DIT Integration: No AES key found in cookies for customer_id ' . ($customer_id ?? 'null'));
     return null;
 }
 

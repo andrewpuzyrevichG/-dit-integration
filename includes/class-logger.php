@@ -71,11 +71,6 @@ class Logger
 
         // Write to file
         file_put_contents($this->log_file, $log_entry, FILE_APPEND | LOCK_EX);
-
-        // Also log to WordPress error log if debug is enabled
-        if (defined('WP_DEBUG') && WP_DEBUG) {
-            error_log('DIT Integration: ' . $action . ' - ' . $message);
-        }
     }
 
     /**
@@ -183,7 +178,6 @@ class Logger
             }
             return true; // File doesn't exist, so it's already "clear"
         } catch (\Exception $e) {
-            error_log('DIT Integration: Failed to clear log file: ' . $e->getMessage());
             return false;
         }
     }

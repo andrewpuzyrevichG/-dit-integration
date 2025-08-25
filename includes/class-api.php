@@ -69,7 +69,10 @@ class API
      */
     private function __construct()
     {
-        $this->api_base_url = 'https://api.dataintegritytool.org:5001';
+        // Try to get API URL from settings first, fallback to hardcoded
+        $settings = get_option('dit_settings', []);
+        $this->api_base_url = $settings['dit_api_url'] ?? 'https://api.dataintegritytool.org:5001';
+
         $this->load_rsa_key_from_transient();
     }
 
@@ -118,7 +121,102 @@ class API
         // Add any initialization logic here
         // For example, we could verify the API connection
         // Note: RSA key will be fetched when needed, not during initialization
-        error_log('DIT Integration: API initialized successfully');
+    }
+
+    /**
+     * Update API base URL from settings
+     */
+    public function update_api_url(): void
+    {
+        $settings = get_option('dit_settings', []);
+        $new_url = $settings['dit_api_url'] ?? null;
+
+        if ($new_url && $new_url !== $this->api_base_url) {
+            $this->api_base_url = $new_url;
+
+            $core = Core::get_instance();
+            $logger = $core->logger;
+
+            $logger->log_api_interaction('API URL Update', [
+                'old_url' => $this->api_base_url,
+                'new_url' => $new_url,
+                'step' => 'url_updated'
+            ], 'info', 'API base URL updated from settings');
+        }
+    }
+
+    /**
+     * Test API endpoint availability
+     *
+     * @param string $endpoint Endpoint to test (e.g., '/Customers/GetCustomer')
+     * @return array Test results
+     */
+    public function test_endpoint(string $endpoint): array
+    {
+        $core = Core::get_instance();
+        $logger = $core->logger;
+
+        $test_url = $this->api_base_url . $endpoint;
+
+        $logger->log_api_interaction('Endpoint Test', [
+            'endpoint' => $endpoint,
+            'test_url' => $test_url,
+            'step' => 'test_start'
+        ], 'info', 'Testing endpoint availability: ' . $endpoint);
+
+        try {
+            $response = wp_remote_get($test_url, [
+                'timeout' => 10,
+                'sslverify' => true,
+                'headers' => [
+                    'Accept' => '*/*',
+                    'User-Agent' => 'WordPress/' . get_bloginfo('version') . '; ' . get_bloginfo('url')
+                ]
+            ]);
+
+            if (is_wp_error($response)) {
+                return [
+                    'success' => false,
+                    'error' => $response->get_error_message(),
+                    'endpoint' => $endpoint,
+                    'url' => $test_url
+                ];
+            }
+
+            $response_code = wp_remote_retrieve_response_code($response);
+            $body = wp_remote_retrieve_body($response);
+
+            $result = [
+                'success' => $response_code === 200,
+                'response_code' => $response_code,
+                'response_body' => $body,
+                'endpoint' => $endpoint,
+                'url' => $test_url
+            ];
+
+            $logger->log_api_interaction('Endpoint Test', [
+                'endpoint' => $endpoint,
+                'test_url' => $test_url,
+                'result' => $result,
+                'step' => 'test_completed'
+            ], $result['success'] ? 'success' : 'error', 'Endpoint test completed: ' . $endpoint);
+
+            return $result;
+        } catch (Exception $e) {
+            $logger->log_api_interaction('Endpoint Test', [
+                'endpoint' => $endpoint,
+                'test_url' => $test_url,
+                'error' => $e->getMessage(),
+                'step' => 'test_exception'
+            ], 'error', 'Endpoint test failed with exception: ' . $endpoint);
+
+            return [
+                'success' => false,
+                'error' => $e->getMessage(),
+                'endpoint' => $endpoint,
+                'url' => $test_url
+            ];
+        }
     }
 
     /**
@@ -200,7 +298,7 @@ class API
                 'error',
                 'Failed to get RSA key'
             );
-            error_log('DIT Integration: Failed to get RSA key - ' . $e->getMessage());
+
             return null;
         }
     }
@@ -1987,6 +2085,20 @@ class API
 
         // Get AES key directly from customer-specific storage (session/cookies/user_meta)
         // This is the correct way based on the new architecture where AES keys are stored per customer_id
+        $logger->log_api_interaction('Get Users For Customer', [
+            'user_id' => $customer_id,
+            'step' => 'before_get_aes_key',
+            'session_id' => session_id(),
+            'session_status' => session_status() === PHP_SESSION_ACTIVE ? 'Active' : 'Inactive',
+            'session_data_keys' => isset($_SESSION) ? array_keys($_SESSION) : [],
+            'dit_aes_keys_exists' => isset($_SESSION['dit_aes_keys']),
+            'dit_aes_keys_count' => isset($_SESSION['dit_aes_keys']) ? count($_SESSION['dit_aes_keys']) : 0,
+            'dit_aes_keys_customer_exists' => isset($_SESSION['dit_aes_keys'][$customer_id]),
+            'login_aes_key_exists' => isset($_SESSION['login_aes_key']),
+            'login_aes_key_length' => isset($_SESSION['login_aes_key']) ? strlen($_SESSION['login_aes_key']) : 0,
+            'note' => 'Cookies removed - AES keys stored only in session'
+        ], 'info', 'About to retrieve AES key for customer ' . $customer_id . ' (GetUsersForCustomer, cookies disabled)');
+
         $aes_key = $this->get_user_permanent_aes_key($customer_id);
 
         if (empty($aes_key)) {
@@ -2004,6 +2116,8 @@ class API
             'aes_key_found' => true,
             'aes_key_source' => 'get_user_permanent_aes_key',
             'aes_key_length' => strlen($aes_key),
+            'aes_key_type' => (ctype_xdigit($aes_key) ? 'hex' : 'binary'),
+            'aes_key_preview' => (strlen($aes_key) <= 32 ? bin2hex(substr($aes_key, 0, 8)) . '...' : substr($aes_key, 0, 20) . '...'),
             'step' => 'aes_key_retrieved'
         ], 'info', 'AES key retrieved successfully for customer ' . $customer_id);
 
@@ -3040,6 +3154,23 @@ class API
      */
     public function register_customer_rsa(array $user_data): ?int
     {
+        // ANTI-DUPLICATE PROTECTION: Prevent multiple simultaneous processing of the same email
+        static $processing_emails = [];
+        $email = $user_data['email'] ?? '';
+
+        if (in_array($email, $processing_emails)) {
+            $core = Core::get_instance();
+            $logger = $core->logger;
+
+            $logger->log_api_interaction('Register Customer RSA', [
+                'step' => 'duplicate_prevented',
+                'email' => $email
+            ], 'warning', 'Duplicate registration prevented');
+            return null;
+        }
+
+        $processing_emails[] = $email;
+
         $core = Core::get_instance();
         $logger = $core->logger;
         $encryption = $core->encryption;
@@ -3314,6 +3445,12 @@ class API
             ], 'error', 'Failed to register customer: ' . $e->getMessage());
             error_log('DIT Integration: Failed to register customer - ' . $e->getMessage());
             return null;
+        } finally {
+            // ANTI-DUPLICATE CLEANUP: Remove email from processing array
+            $key = array_search($email, $processing_emails);
+            if ($key !== false) {
+                unset($processing_emails[$key]);
+            }
         }
     }
 
@@ -4195,6 +4332,21 @@ class API
             ], 'info', 'User data encoded to JSON');
 
             // Get AES key directly from customer-specific storage
+            $logger->log_api_interaction('Update User', [
+                'user_id' => $user_id,
+                'customer_id' => $customer_id,
+                'step' => 'before_get_aes_key',
+                'session_id' => session_id(),
+                'session_status' => session_status() === PHP_SESSION_ACTIVE ? 'Active' : 'Inactive',
+                'session_data_keys' => isset($_SESSION) ? array_keys($_SESSION) : [],
+                'dit_aes_keys_exists' => isset($_SESSION['dit_aes_keys']),
+                'dit_aes_keys_count' => isset($_SESSION['dit_aes_keys']) ? count($_SESSION['dit_aes_keys']) : 0,
+                'dit_aes_keys_customer_exists' => isset($_SESSION['dit_aes_keys'][$customer_id]),
+                'login_aes_key_exists' => isset($_SESSION['login_aes_key']),
+                'login_aes_key_length' => isset($_SESSION['login_aes_key']) ? strlen($_SESSION['login_aes_key']) : 0,
+                'note' => 'Cookies removed - AES keys stored only in session'
+            ], 'info', 'About to retrieve AES key for customer ' . $customer_id . ' (cookies disabled)');
+
             $aes_key = $this->get_user_permanent_aes_key($customer_id);
 
             if (!$aes_key) {
@@ -4212,6 +4364,8 @@ class API
                     'aes_key_found' => true,
                     'aes_key_source' => 'get_user_permanent_aes_key',
                     'aes_key_length' => strlen($aes_key),
+                    'aes_key_type' => (ctype_xdigit($aes_key) ? 'hex' : 'binary'),
+                    'aes_key_preview' => (strlen($aes_key) <= 32 ? bin2hex(substr($aes_key, 0, 8)) . '...' : substr($aes_key, 0, 20) . '...'),
                     'step' => 'aes_key_retrieved'
                 ], 'info', 'AES key retrieved for customer ' . $customer_id);
             }
@@ -4275,13 +4429,103 @@ class API
                 'step' => 'data_encrypted'
             ], 'info', 'User data encrypted successfully');
 
-            // Prepare request payload
+            // ЛОГУВАННЯ ЗМІННИХ ПЕРЕД СТВОРЕННЯМ REQUEST_PAYLOAD
+            $logger->log_api_interaction('Update User', [
+                'user_id' => $user_id,
+                'customer_id' => $customer_id,
+                'step' => 'variables_before_payload',
+                'variables_analysis' => [
+                    'customer_id' => [
+                        'value' => $customer_id,
+                        'type' => gettype($customer_id),
+                        'is_null' => is_null($customer_id),
+                        'is_int' => is_int($customer_id),
+                        'is_numeric' => is_numeric($customer_id)
+                    ],
+                    'iv_hex' => [
+                        'value' => $iv_hex,
+                        'type' => gettype($iv_hex),
+                        'is_string' => is_string($iv_hex),
+                        'length' => strlen($iv_hex),
+                        'is_hex' => ctype_xdigit($iv_hex),
+                        'is_empty' => empty($iv_hex)
+                    ],
+                    'encrypted_data' => [
+                        'value_preview' => substr($encrypted_data, 0, 50) . '...',
+                        'type' => gettype($encrypted_data),
+                        'is_string' => is_string($encrypted_data),
+                        'length' => strlen($encrypted_data),
+                        'is_empty' => empty($encrypted_data),
+                        'is_binary' => !ctype_print($encrypted_data)
+                    ]
+                ],
+                'all_variables_valid' => !is_null($customer_id) && is_int($customer_id) &&
+                    is_string($iv_hex) && !empty($iv_hex) && ctype_xdigit($iv_hex) &&
+                    is_string($encrypted_data) && !empty($encrypted_data)
+            ], 'info', 'Variables validation before creating request payload');
+
+            // Prepare request payload with base64 encoded encrypted data
+            $encrypted_data_base64 = base64_encode($encrypted_data);
+
+            // IMPORTANT: aesIVHex now contains IV instead of AES key
+            // This allows the server to generate AES key using the provided IV
+
+            $logger->log_api_interaction('Update User', [
+                'user_id' => $user_id,
+                'customer_id' => $customer_id,
+                'step' => 'base64_encoding',
+                'encrypted_data_length' => strlen($encrypted_data),
+                'encrypted_data_base64_length' => strlen($encrypted_data_base64),
+                'base64_encoding_success' => !empty($encrypted_data_base64),
+                'base64_encoding_valid' => base64_decode($encrypted_data_base64) === $encrypted_data
+            ], 'info', 'Base64 encoding of encrypted data');
+
             $request_payload = [
                 'primaryKey' => $customer_id,
                 'type' => 2,
-                'aesIVHex' => $iv_hex,
-                'encryptedData' => $encrypted_data
+                'aesIVHex' => $iv_hex, // Передаємо IV замість AES ключа
+                'encryptedData' => $encrypted_data_base64
             ];
+
+            // ЛОГУВАННЯ СТРУКТУРИ REQUEST_PAYLOAD (aesIVHex тепер містить IV замість AES ключа)
+            $logger->log_api_interaction('Update User', [
+                'user_id' => $user_id,
+                'customer_id' => $customer_id,
+                'step' => 'request_payload_created',
+                'request_payload_structure' => [
+                    'primaryKey' => [
+                        'value' => $customer_id,
+                        'type' => gettype($customer_id),
+                        'is_null' => is_null($customer_id),
+                        'is_int' => is_int($customer_id)
+                    ],
+                    'type' => [
+                        'value' => 1,
+                        'type' => gettype(1),
+                        'is_int' => is_int(1)
+                    ],
+                    'aesIVHex' => [
+                        'value' => $iv_hex,
+                        'type' => gettype($iv_hex),
+                        'is_string' => is_string($iv_hex),
+                        'length' => strlen($iv_hex),
+                        'is_hex' => ctype_xdigit($iv_hex),
+                        'note' => 'Now contains IV instead of AES key'
+                    ],
+                    'encryptedData' => [
+                        'value_preview' => substr($encrypted_data_base64, 0, 50) . '...',
+                        'type' => gettype($encrypted_data_base64),
+                        'is_string' => is_string($encrypted_data_base64),
+                        'length' => strlen($encrypted_data_base64),
+                        'is_empty' => empty($encrypted_data_base64),
+                        'is_base64' => !empty($encrypted_data_base64) && base64_decode($encrypted_data_base64) !== false
+                    ]
+                ],
+                'all_values_valid' => !is_null($customer_id) && is_int($customer_id) &&
+                    is_string($iv_hex) && !empty($iv_hex) &&
+                    is_string($encrypted_data) && !empty($encrypted_data) &&
+                    is_string($encrypted_data_base64) && !empty($encrypted_data_base64)
+            ], 'info', 'Request payload structure validation');
 
             $logger->log_api_interaction('Update User', [
                 'user_id' => $user_id,
@@ -4289,15 +4533,77 @@ class API
                 'iv_hex' => $iv_hex,
                 'iv_hex_length' => strlen($iv_hex),
                 'iv_hex_valid' => ctype_xdigit($iv_hex),
+                'iv_hex_for_request' => $iv_hex,
+                'iv_hex_for_request_length' => strlen($iv_hex),
+                'iv_hex_for_request_valid' => ctype_xdigit($iv_hex),
                 'encrypted_data_length' => strlen($encrypted_data),
+                'encrypted_data_base64_length' => strlen($encrypted_data_base64),
                 'data_keys' => array_keys($data_to_encrypt),
                 'password_provided' => !empty($user_data['password']),
+                'note' => 'aesIVHex now contains IV instead of AES key',
                 'step' => 'request_prepared'
             ], 'info', 'Update user request prepared');
 
             // Send POST request to UpdateUser endpoint
             $request_url = $this->api_base_url . '/Users/UpdateUser';
+
+            // ДЕТАЛЬНЕ ЛОГУВАННЯ ДЛЯ ДІАГНОСТИКИ
+            $logger->log_api_interaction('Update User', [
+                'user_id' => $user_id,
+                'customer_id' => $customer_id,
+                'step' => 'before_json_encode',
+                'request_payload' => $request_payload,
+                'request_payload_type' => gettype($request_payload),
+                'request_payload_count' => is_array($request_payload) ? count($request_payload) : 'N/A',
+                'request_payload_keys' => is_array($request_payload) ? array_keys($request_payload) : 'N/A',
+                'primaryKey_type' => gettype($request_payload['primaryKey']),
+                'primaryKey_value' => $request_payload['primaryKey'],
+                'type_type' => gettype($request_payload['type']),
+                'type_value' => $request_payload['type'],
+                'aesIVHex_type' => gettype($request_payload['aesIVHex']),
+                'aesIVHex_value' => $request_payload['aesIVHex'],
+                'aesIVHex_length' => strlen($request_payload['aesIVHex']),
+                'aesIVHex_is_hex' => ctype_xdigit($request_payload['aesIVHex']),
+                'aesIVHex_note' => 'Now contains IV instead of AES key',
+                'encryptedData_type' => gettype($request_payload['encryptedData']),
+                'encryptedData_length' => strlen($request_payload['encryptedData']),
+                'encryptedData_preview' => substr($request_payload['encryptedData'], 0, 50) . '...',
+                'encryptedData_is_base64' => !empty($request_payload['encryptedData']) && base64_decode($request_payload['encryptedData']) !== false
+            ], 'info', 'Request payload details before JSON encoding');
+
             $request_body = json_encode($request_payload);
+
+            // ЛОГУВАННЯ РЕЗУЛЬТАТУ JSON_ENCODE
+            $json_encode_error = json_last_error();
+            $json_encode_error_msg = json_last_error_msg();
+
+            $logger->log_api_interaction('Update User', [
+                'user_id' => $user_id,
+                'customer_id' => $customer_id,
+                'step' => 'after_json_encode',
+                'json_encode_success' => $request_body !== false,
+                'json_encode_error' => $json_encode_error,
+                'json_encode_error_msg' => $json_encode_error_msg,
+                'request_body_type' => gettype($request_body),
+                'request_body_length' => $request_body !== false ? strlen($request_body) : 'N/A',
+                'request_body_preview' => $request_body !== false ? substr($request_body, 0, 100) . '...' : 'N/A',
+                'request_body_is_false' => $request_body === false,
+                'request_body_is_null' => $request_body === null,
+                'request_body_is_bool' => is_bool($request_body)
+            ], 'info', 'JSON encoding result analysis');
+
+            // ПЕРЕВІРКА НА ПОМИЛКИ JSON_ENCODE
+            if ($request_body === false) {
+                $logger->log_api_interaction('Update User', [
+                    'user_id' => $user_id,
+                    'customer_id' => $customer_id,
+                    'step' => 'json_encode_failed',
+                    'json_error' => $json_encode_error,
+                    'json_error_msg' => $json_encode_error_msg,
+                    'request_payload_debug' => var_export($request_payload, true)
+                ], 'error', 'JSON encoding failed for request payload');
+                throw new Exception('Failed to encode request payload to JSON: ' . $json_encode_error_msg);
+            }
 
             $logger->log_api_interaction('Update User', [
                 'user_id' => $user_id,
@@ -4308,7 +4614,8 @@ class API
                 'step' => 'request_sending'
             ], 'info', 'Sending POST request to UpdateUser endpoint');
 
-            $response = wp_remote_post($request_url, [
+            // ДЕТАЛЬНЕ ЛОГУВАННЯ ПАРАМЕТРІВ WP_REMOTE_POST
+            $wp_remote_params = [
                 'timeout' => 30,
                 'sslverify' => true,
                 'headers' => [
@@ -4316,15 +4623,53 @@ class API
                     'User-Agent' => 'WordPress/' . get_bloginfo('version') . '; ' . get_bloginfo('url')
                 ],
                 'body' => $request_body
-            ]);
+            ];
+
+            $logger->log_api_interaction('Update User', [
+                'user_id' => $user_id,
+                'customer_id' => $customer_id,
+                'step' => 'wp_remote_post_params',
+                'wp_remote_params' => $wp_remote_params,
+                'body_type' => gettype($wp_remote_params['body']),
+                'body_is_string' => is_string($wp_remote_params['body']),
+                'body_is_array' => is_array($wp_remote_params['body']),
+                'body_is_bool' => is_bool($wp_remote_params['body']),
+                'body_is_null' => is_null($wp_remote_params['body']),
+                'body_length' => is_string($wp_remote_params['body']) ? strlen($wp_remote_params['body']) : 'N/A',
+                'body_preview' => is_string($wp_remote_params['body']) ? substr($wp_remote_params['body'], 0, 100) . '...' : 'N/A'
+            ], 'info', 'wp_remote_post parameters analysis');
+
+            $response = wp_remote_post($request_url, $wp_remote_params);
+
+            // ЛОГУВАННЯ РЕЗУЛЬТАТУ WP_REMOTE_POST
+            $logger->log_api_interaction('Update User', [
+                'user_id' => $user_id,
+                'customer_id' => $customer_id,
+                'step' => 'wp_remote_post_result',
+                'response_type' => gettype($response),
+                'response_is_wp_error' => is_wp_error($response),
+                'response_is_array' => is_array($response),
+                'response_is_null' => is_null($response),
+                'response_is_bool' => is_bool($response),
+                'response_is_string' => is_string($response),
+                'response_is_object' => is_object($response),
+                'response_class' => is_object($response) ? get_class($response) : 'N/A',
+                'response_count' => is_array($response) ? count($response) : 'N/A',
+                'response_keys' => is_array($response) ? array_keys($response) : 'N/A'
+            ], 'info', 'wp_remote_post result analysis');
 
             if (is_wp_error($response)) {
                 $logger->log_api_interaction('Update User', [
                     'user_id' => $user_id,
                     'customer_id' => $customer_id,
-                    'error' => $response->get_error_message(),
+                    'step' => 'wp_error_detailed',
+                    'error_message' => $response->get_error_message(),
+                    'error_code' => $response->get_error_code(),
+                    'error_data' => $response->get_error_data(),
+                    'response_object_class' => get_class($response),
+                    'response_object_methods' => get_class_methods($response),
                     'step' => 'wp_error'
-                ], 'error', 'Update user failed with WordPress error');
+                ], 'error', 'Update user failed with WordPress error - detailed analysis');
                 throw new Exception('Failed to update user: ' . $response->get_error_message());
             }
 
@@ -4659,8 +5004,8 @@ class API
                 throw new Exception('Failed to encrypt customer data');
             }
 
-            // Use binary format like UpdateUser (reverting from string format)
-            $encrypted_data_string = $encrypted_data;
+            // Use base64 encoded format for JSON compatibility
+            $encrypted_data_string = base64_encode($encrypted_data);
 
             $logger->log_api_interaction('Update Customer', [
                 'customer_id' => $customer_id,
@@ -4673,10 +5018,12 @@ class API
                 'aes_key_final_length' => mb_strlen($aes_key, '8bit'),
                 'data_block_length_valid' => (strlen($encrypted_data) % 16) === 0,
                 'data_block_length' => strlen($encrypted_data),
+                'base64_encoding_success' => !empty($encrypted_data_string),
+                'base64_encoding_valid' => base64_decode($encrypted_data_string) === $encrypted_data,
                 'step' => 'data_encrypted'
-            ], 'info', 'Customer data encrypted successfully (using binary format like UpdateUser)');
+            ], 'info', 'Customer data encrypted successfully (using base64 encoded format for JSON compatibility)');
 
-            // Prepare request payload with binary format encrypted data (like UpdateUser)
+            // Prepare request payload with base64 encoded encrypted data for JSON compatibility
             $request_payload = [
                 'primaryKey' => $customer_id,
                 'type' => 2,  // typeCustomer = 2 (NOT 1!)
@@ -4844,6 +5191,9 @@ class API
         $iv_hex = bin2hex($iv); // hex-encode the IV as per developer instructions
 
         try {
+            // Update API URL from settings before making request
+            $this->update_api_url();
+
             // Form GET request URL with parameters including IV
             $request_url = $this->api_base_url . '/Customers/GetCustomer?CustomerId=' . urlencode($customer_id) . '&AesIVHex=' . $iv_hex;
 
@@ -4852,6 +5202,7 @@ class API
                 'iv_hex' => $iv_hex,
                 'iv_base64_for_decryption' => base64_encode(hex2bin($iv_hex)),
                 'url' => $request_url,
+                'api_base_url' => $this->api_base_url,
                 'step' => 'request_start'
             ], 'info', 'Starting get customer request with IV');
 
@@ -4893,7 +5244,67 @@ class API
                     'response_body' => $body,
                     'step' => 'http_error'
                 ], 'error', 'Get customer failed with HTTP ' . $response_code);
-                throw new Exception('Failed to get customer: HTTP ' . $response_code);
+
+                // Try alternative endpoint if main one fails
+                if ($response_code === 404) {
+                    $logger->log_api_interaction('Get Customer', [
+                        'customer_id' => $customer_id,
+                        'step' => 'trying_alternative_endpoint',
+                        'note' => 'GetCustomer returned 404, trying alternative endpoints'
+                    ], 'warning', 'GetCustomer endpoint not found, trying alternatives');
+
+                    // Try alternative endpoint names
+                    $alternative_endpoints = [
+                        '/Customers/GetCustomerInfo',
+                        '/Customers/GetCustomerData',
+                        '/Customers/CustomerInfo'
+                    ];
+
+                    foreach ($alternative_endpoints as $endpoint) {
+                        $alt_url = $this->api_base_url . $endpoint . '?CustomerId=' . urlencode($customer_id) . '&AesIVHex=' . $iv_hex;
+
+                        $logger->log_api_interaction('Get Customer', [
+                            'customer_id' => $customer_id,
+                            'alternative_endpoint' => $endpoint,
+                            'alt_url' => $alt_url,
+                            'step' => 'trying_alternative'
+                        ], 'info', 'Trying alternative endpoint: ' . $endpoint);
+
+                        $alt_response = wp_remote_get($alt_url, [
+                            'timeout' => 30,
+                            'sslverify' => true,
+                            'headers' => [
+                                'Accept' => '*/*',
+                                'User-Agent' => 'WordPress/' . get_bloginfo('version') . '; ' . get_bloginfo('url')
+                            ]
+                        ]);
+
+                        if (!is_wp_error($alt_response)) {
+                            $alt_code = wp_remote_retrieve_response_code($alt_response);
+                            if ($alt_code === 200) {
+                                $logger->log_api_interaction('Get Customer', [
+                                    'customer_id' => $customer_id,
+                                    'alternative_endpoint' => $endpoint,
+                                    'alt_url' => $alt_url,
+                                    'step' => 'alternative_success'
+                                ], 'success', 'Alternative endpoint successful: ' . $endpoint);
+
+                                // Use alternative response
+                                $body = wp_remote_retrieve_body($alt_response);
+                                $headers = wp_remote_retrieve_headers($alt_response);
+                                $response_code = 200;
+                                break;
+                            }
+                        }
+                    }
+
+                    // If still no success, throw original error
+                    if ($response_code !== 200) {
+                        throw new Exception('Failed to get customer: HTTP ' . $response_code . ' (tried alternatives)');
+                    }
+                } else {
+                    throw new Exception('Failed to get customer: HTTP ' . $response_code);
+                }
             }
 
             // Convert headers to array

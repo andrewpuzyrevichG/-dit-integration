@@ -28,25 +28,13 @@ define('DIT_PLUGIN_VERSION', '1.2.0');
 global $dit_plugin_initialized;
 $dit_plugin_initialized = false;
 
-// Debug information (only in debug mode)
-if (defined('WP_DEBUG') && WP_DEBUG) {
-    error_log('DIT Integration: Plugin file: ' . DIT_PLUGIN_FILE);
-    error_log('DIT Integration: Plugin directory: ' . DIT_PLUGIN_DIR);
-    error_log('DIT Integration: Plugin URL: ' . DIT_PLUGIN_URL);
-    error_log('DIT Integration: Plugin version: ' . DIT_PLUGIN_VERSION);
-}
-
 // Verify constants are set correctly
 if (!defined('DIT_PLUGIN_DIR')) {
-    error_log('DIT Integration: ERROR - DIT_PLUGIN_DIR not defined!');
-} else {
-    error_log('DIT Integration: DIT_PLUGIN_DIR is defined: ' . DIT_PLUGIN_DIR);
+    // DIT_PLUGIN_DIR not defined
 }
 
 if (!defined('DIT_PLUGIN_FILE')) {
-    error_log('DIT Integration: ERROR - DIT_PLUGIN_FILE not defined!');
-} else {
-    error_log('DIT Integration: DIT_PLUGIN_FILE is defined: ' . DIT_PLUGIN_FILE);
+    // DIT_PLUGIN_FILE not defined
 }
 
 // Autoloader for plugin classes
@@ -68,55 +56,23 @@ spl_autoload_register(function ($class) {
         DIT_PLUGIN_DIR . 'includes/' . $file_name
     ];
 
-    // Debug logging (only in debug mode)
-    if (defined('WP_DEBUG') && WP_DEBUG) {
-        error_log('DIT Integration: Autoloader trying to load class: ' . $class);
-        error_log('DIT Integration: Looking for file: ' . $file_name);
-        error_log('DIT Integration: DIT_PLUGIN_DIR: ' . DIT_PLUGIN_DIR);
-        error_log('DIT Integration: Search order: admin/ first, then includes/');
-    }
+
 
     // Check each path and include the file if it exists
     foreach ($paths as $file_path) {
-        if (defined('WP_DEBUG') && WP_DEBUG) {
-            error_log('DIT Integration: Checking path: ' . $file_path);
-            error_log('DIT Integration: File exists: ' . (file_exists($file_path) ? 'Yes' : 'No'));
-            if (file_exists($file_path)) {
-                error_log('DIT Integration: File permissions: ' . decoct(fileperms($file_path)));
-                error_log('DIT Integration: File size: ' . filesize($file_path) . ' bytes');
-                error_log('DIT Integration: File readable: ' . (is_readable($file_path) ? 'Yes' : 'No'));
-            }
-        }
+
 
         if (file_exists($file_path)) {
-            if (defined('WP_DEBUG') && WP_DEBUG) {
-                error_log('DIT Integration: Found file at: ' . $file_path);
-            }
-
             // Try to include the file
             try {
                 require_once $file_path;
-
-                if (defined('WP_DEBUG') && WP_DEBUG) {
-                    error_log('DIT Integration: File included successfully from: ' . $file_path);
-                    if (class_exists($class)) {
-                        error_log('DIT Integration: Class ' . $class . ' loaded successfully from: ' . $file_path);
-                    } else {
-                        error_log('DIT Integration: WARNING - Class ' . $class . ' not found after including file: ' . $file_path);
-                    }
-                }
             } catch (Exception $e) {
-                error_log('DIT Integration: Exception while including file: ' . $e->getMessage());
+                // Exception while including file
             } catch (Error $e) {
-                error_log('DIT Integration: Error while including file: ' . $e->getMessage());
+                // Error while including file
             }
             return;
         }
-    }
-
-    if (defined('WP_DEBUG') && WP_DEBUG) {
-        error_log('DIT Integration: File not found for class: ' . $class);
-        error_log('DIT Integration: Checked paths: ' . implode(', ', $paths));
     }
 });
 
@@ -128,14 +84,7 @@ $class_files = [
     'includes/class-wpforms.php'
 ];
 
-foreach ($class_files as $file) {
-    $full_path = DIT_PLUGIN_DIR . $file;
-    if (file_exists($full_path)) {
-        error_log('DIT Integration: Class file exists: ' . $file);
-    } else {
-        error_log('DIT Integration: ERROR - Class file missing: ' . $file);
-    }
-}
+
 
 // Manually load critical classes to ensure they are available
 try {
@@ -143,9 +92,6 @@ try {
     $api_file = DIT_PLUGIN_DIR . 'includes/class-api.php';
     if (file_exists($api_file)) {
         require_once $api_file;
-        error_log('DIT Integration: API class loaded manually');
-    } else {
-        error_log('DIT Integration: ERROR - API file not found for manual load: ' . $api_file);
     }
 
 
@@ -154,24 +100,18 @@ try {
         $wpforms_file = DIT_PLUGIN_DIR . 'includes/class-wpforms.php';
         if (file_exists($wpforms_file)) {
             require_once $wpforms_file;
-            error_log('DIT Integration: WPForms class loaded manually');
-        } else {
-            error_log('DIT Integration: ERROR - WPForms file not found for manual load: ' . $wpforms_file);
         }
     }
 } catch (Exception $e) {
-    error_log('DIT Integration: Exception during manual class loading: ' . $e->getMessage());
+    // Exception during manual class loading
 } catch (Error $e) {
-    error_log('DIT Integration: Error during manual class loading: ' . $e->getMessage());
+    // Error during manual class loading
 }
 
 // Load helpers file with utility functions
 $helpers_file = DIT_PLUGIN_DIR . 'includes/helpers.php';
 if (file_exists($helpers_file)) {
     require_once $helpers_file;
-    error_log('DIT Integration: Helpers file loaded successfully');
-} else {
-    error_log('DIT Integration: ERROR - Helpers file not found: ' . $helpers_file);
 }
 
 // Verify assets directory exists
@@ -180,31 +120,20 @@ $js_dir = $assets_dir . '/js';
 $css_dir = $assets_dir . '/css';
 
 if (!file_exists($assets_dir)) {
-    error_log('DIT Integration: Assets directory does not exist: ' . $assets_dir);
     mkdir($assets_dir, 0755, true);
 }
 
 if (!file_exists($js_dir)) {
-    error_log('DIT Integration: JS directory does not exist: ' . $js_dir);
     mkdir($js_dir, 0755, true);
 }
 
 if (!file_exists($css_dir)) {
-    error_log('DIT Integration: CSS directory does not exist: ' . $css_dir);
     mkdir($css_dir, 0755, true);
 }
 
 // Verify assets files exist
 $js_file = $js_dir . '/admin.js';
 $css_file = $css_dir . '/admin.css';
-
-if (!file_exists($js_file)) {
-    error_log('DIT Integration: JS file does not exist: ' . $js_file);
-}
-
-if (!file_exists($css_file)) {
-    error_log('DIT Integration: CSS file does not exist: ' . $css_file);
-}
 
 /**
  * Check if WPForms is active
@@ -276,7 +205,6 @@ function activate_dit()
     }
 
     // Note: Database functionality has been removed
-    error_log('DIT Integration: Database functionality removed - using WordPress standard tables only');
 
     // Set default options
     add_option('dit_settings', [
@@ -302,7 +230,6 @@ function activate_dit()
 function deactivate_dit()
 {
     // Note: Database functionality has been removed
-    error_log('DIT Integration: Database functionality removed - no tables to drop');
 
     // Flush rewrite rules
     flush_rewrite_rules();
@@ -314,11 +241,10 @@ register_deactivation_hook(__FILE__, 'deactivate_dit');
 // Load custom page templates
 add_filter('template_include', 'dit_load_custom_template');
 
-// Initialize the plugin
+// Initialize the plugin (single hook to prevent duplication)
 add_action('plugins_loaded', 'run_dit', 20);
 
-// Additional hook for admin initialization
-add_action('admin_init', 'run_dit', 10);
+// REMOVED: admin_init hook to prevent duplicate initialization
 
 // Initialize PHP sessions early
 add_action('init', 'dit_init_sessions', 1);
@@ -330,9 +256,6 @@ function dit_init_sessions()
 {
     if (!session_id()) {
         session_start();
-        if (defined('WP_DEBUG') && WP_DEBUG) {
-            error_log('DIT Integration: PHP sessions initialized');
-        }
     }
 }
 
@@ -369,60 +292,20 @@ function run_dit()
 
     $dit_plugin_initialized = true;
 
-    if (defined('WP_DEBUG') && WP_DEBUG) {
-        error_log('DIT Integration: Starting plugin initialization');
-    }
-
     // Load plugin text domain
     load_plugin_textdomain('dit-integration', false, dirname(plugin_basename(__FILE__)) . '/languages');
-
-    if (defined('WP_DEBUG') && WP_DEBUG) {
-        error_log('DIT Integration: Text domain loaded');
-    }
 
     // Check Stripe availability
     dit_check_stripe();
 
-    if (defined('WP_DEBUG') && WP_DEBUG) {
-        error_log('DIT Integration: Stripe check completed');
-    }
-
-    // Initialize main plugin class
-    if (defined('WP_DEBUG') && WP_DEBUG) {
-        error_log('DIT Integration: Initializing Core class');
-    }
-
     if (class_exists('DIT\\Core')) {
-        if (defined('WP_DEBUG') && WP_DEBUG) {
-            error_log('DIT Integration: Core class found');
-        }
-
         $plugin = \DIT\Core::get_instance();
-
-        if (defined('WP_DEBUG') && WP_DEBUG) {
-            error_log('DIT Integration: Core instance created');
-        }
-
         $plugin->run();
-
-        if (defined('WP_DEBUG') && WP_DEBUG) {
-            error_log('DIT Integration: Core run completed');
-        }
-    } else {
-        error_log('DIT Integration: Core class not found');
     }
 
     // Initialize AJAX handlers
     if (class_exists('DIT\\AJAX_Handlers')) {
-        if (defined('WP_DEBUG') && WP_DEBUG) {
-            error_log('DIT Integration: Initializing AJAX handlers');
-        }
         new \DIT\AJAX_Handlers();
-        if (defined('WP_DEBUG') && WP_DEBUG) {
-            error_log('DIT Integration: AJAX handlers initialized');
-        }
-    } else {
-        error_log('DIT Integration: AJAX_Handlers class not found');
     }
 }
 
@@ -432,19 +315,14 @@ add_action('wp_ajax_nopriv_dit_session_heartbeat', 'dit_session_heartbeat_handle
 
 function dit_session_heartbeat_handler()
 {
-    error_log('DIT Integration: dit_session_heartbeat_handler called');
-
     if (!session_id()) {
         session_start();
-        error_log('DIT Integration: Session started in heartbeat handler');
     }
 
     if (isset($_SESSION['dit_user_session'])) {
         $_SESSION['dit_user_session']['last_activity'] = time();
-        error_log('DIT Integration: Session activity updated to ' . time());
         wp_send_json_success(['status' => 'ok', 'updated' => true]);
     } else {
-        error_log('DIT Integration: No dit_user_session found in heartbeat handler');
         wp_send_json_success(['status' => 'no_session', 'updated' => false]);
     }
     wp_die();

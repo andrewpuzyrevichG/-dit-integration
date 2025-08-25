@@ -62,11 +62,11 @@ class Dashboard
         add_action('wp_ajax_dit_get_user', [$this, 'handle_get_user']);
         add_action('wp_ajax_nopriv_dit_get_user', [$this, 'handle_get_user']);
         add_action('wp_ajax_dit_update_user', [$this, 'handle_update_user']);
-        add_action('wp_ajax_nopriv_dit_update_user', [$this, 'handle_update_user']);
+        // REMOVED: nopriv handler for update_user (security - only authenticated users can update users)
         add_action('wp_ajax_dit_add_user', [$this, 'handle_add_user']);
-        add_action('wp_ajax_nopriv_dit_add_user', [$this, 'handle_add_user']);
+        // REMOVED: nopriv handler for add_user (security - only authenticated users can add users)
         add_action('wp_ajax_dit_delete_user', [$this, 'handle_delete_user']);
-        add_action('wp_ajax_nopriv_dit_delete_user', [$this, 'handle_delete_user']);
+        // REMOVED: nopriv handler for delete_user (security - only authenticated users can delete users)
         error_log('DIT Dashboard: Customer AJAX handlers registered (with nopriv)');
 
         // User-specific AJAX handlers
@@ -978,6 +978,19 @@ class Dashboard
             }
 
             // Return synchronized users or empty array if none found
+            error_log('DIT Dashboard: About to send JSON response with users: ' . json_encode($users));
+            error_log('DIT Dashboard: Users count: ' . count($users));
+            if (!empty($users)) {
+                error_log('DIT Dashboard: First user structure: ' . json_encode($users[0]));
+                error_log('DIT Dashboard: All users structure: ' . json_encode($users));
+
+                // Log each user individually for analysis
+                foreach ($users as $index => $user) {
+                    error_log('DIT Dashboard: User ' . $index . ' details: ' . json_encode($user));
+                }
+            }
+
+            error_log('DIT Dashboard: Sending JSON response at: ' . date('Y-m-d H:i:s'));
             wp_send_json_success($users);
 
             error_log('DIT Dashboard: JSON response sent successfully');
@@ -1047,16 +1060,40 @@ class Dashboard
 
                     if ($users && is_array($users)) {
                         error_log('DIT Dashboard: GetUsersForCustomer API successful - received ' . count($users) . ' users');
+                        error_log('DIT Dashboard: API response type: ' . gettype($users));
+                        error_log('DIT Dashboard: API response count: ' . count($users));
 
                         // Store users in session for local access
                         $_SESSION['dit_users_' . $customer_id] = $users;
                         $_SESSION['dit_users_sync_time_' . $customer_id] = time();
 
                         error_log('DIT Dashboard: Users stored in session for customer ' . $customer_id);
+                        error_log('DIT Dashboard: Session key: dit_users_' . $customer_id);
+                        error_log('DIT Dashboard: Session sync time: ' . date('Y-m-d H:i:s', time()));
 
                         // Log user details for debugging
                         foreach ($users as $index => $user) {
-                            error_log('DIT Dashboard: - User ' . ($index + 1) . ': ' . json_encode($user));
+                            error_log('DIT Dashboard: - User ' . ($index + 1) . ' details: ' . json_encode($user));
+                        }
+
+                        // Check for duplicates in API response
+                        $emails = [];
+                        $duplicates = [];
+                        foreach ($users as $index => $user) {
+                            $email = $user['Email'] ?? $user['email'] ?? null;
+                            if ($email) {
+                                if (in_array($email, $emails)) {
+                                    $duplicates[] = $email;
+                                } else {
+                                    $emails[] = $email;
+                                }
+                            }
+                        }
+
+                        if (!empty($duplicates)) {
+                            error_log('DIT Dashboard: WARNING - Duplicate emails found in API response: ' . json_encode($duplicates));
+                        } else {
+                            error_log('DIT Dashboard: No duplicate emails found in API response');
                         }
                     } else {
                         error_log('DIT Dashboard: GetUsersForCustomer API returned no users or invalid response');
@@ -1116,6 +1153,24 @@ class Dashboard
      */
     public function handle_add_user(): void
     {
+        // ANTI-DUPLICATE PROTECTION: Prevent multiple simultaneous processing of the same email
+        static $processing_users = [];
+        $email = $_POST['user_data']['email'] ?? '';
+
+        if (in_array($email, $processing_users)) {
+            $core = \DIT\Core::get_instance();
+            $logger = $core->logger;
+
+            $logger->log_api_interaction('Dashboard Add User', [
+                'step' => 'duplicate_prevented',
+                'email' => $email
+            ], 'warning', 'Duplicate request prevented');
+            wp_send_json_error('User is already being processed');
+            return;
+        }
+
+        $processing_users[] = $email;
+
         $core = \DIT\Core::get_instance();
         $logger = $core->logger;
 
@@ -1339,6 +1394,12 @@ class Dashboard
                 'error' => 'API returned null user_id'
             ], 'error', 'Failed to create user via API');
             wp_send_json_error('Failed to create user via API');
+
+            // ANTI-DUPLICATE CLEANUP: Remove email from processing array on error
+            $key = array_search($email, $processing_users);
+            if ($key !== false) {
+                unset($processing_users[$key]);
+            }
             return;
         }
 
@@ -1378,6 +1439,12 @@ class Dashboard
         ], 'success', 'User added successfully via API (database save skipped)');
 
         wp_send_json_success('User added successfully');
+
+        // ANTI-DUPLICATE CLEANUP: Remove email from processing array
+        $key = array_search($email, $processing_users);
+        if ($key !== false) {
+            unset($processing_users[$key]);
+        }
     }
 
     /**

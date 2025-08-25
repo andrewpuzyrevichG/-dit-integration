@@ -18,18 +18,12 @@ class Admin
      */
     public function init()
     {
-        error_log('DIT Integration: Admin class init started');
-        error_log('DIT Integration: Admin init - Current user ID: ' . get_current_user_id());
-        error_log('DIT Integration: Admin init - Is admin: ' . (is_admin() ? 'Yes' : 'No'));
-
         // Add admin menu with higher priority
         add_action('admin_menu', [$this, 'add_admin_menu'], 20);
-        error_log('DIT Integration: Admin init - admin_menu action added with priority 20');
         add_action('admin_init', [$this, 'register_settings']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_scripts']);
 
         // Add AJAX handlers
-        error_log('DIT Integration: Registering AJAX handlers');
         add_action('wp_ajax_dit_save_settings', [$this, 'ajax_save_settings']);
         add_action('wp_ajax_dit_test_api', [$this, 'ajax_test_api']);
         add_action('wp_ajax_dit_clear_logs', [$this, 'ajax_clear_logs']);
@@ -39,9 +33,6 @@ class Admin
 
         // Handle log downloads
         add_action('admin_init', [$this, 'handle_log_download']);
-
-        error_log('DIT Integration: Admin class init completed');
-        error_log('DIT Integration: Admin init - All actions registered successfully');
     }
 
     /**
@@ -49,20 +40,14 @@ class Admin
      */
     public function add_admin_menu()
     {
-        error_log('DIT Integration: Adding admin menu - START');
-        error_log('DIT Integration: Current user ID: ' . get_current_user_id());
-        error_log('DIT Integration: Is admin: ' . (is_admin() ? 'Yes' : 'No'));
-        error_log('DIT Integration: Can manage options: ' . (current_user_can('manage_options') ? 'Yes' : 'No'));
 
         // Check if we're in admin area
         if (!is_admin()) {
-            error_log('DIT Integration: Not in admin area, skipping menu creation');
             return;
         }
 
         // Check user capabilities
         if (!current_user_can('manage_options')) {
-            error_log('DIT Integration: User does not have manage_options capability');
             return;
         }
 
@@ -76,7 +61,7 @@ class Admin
             'dashicons-admin-generic',
             30
         );
-        error_log('DIT Integration: Main menu page added: ' . $main_page);
+
 
         // Add logs submenu page
         $logs_page = add_submenu_page(
@@ -87,7 +72,7 @@ class Admin
             'dit-integration-logs',
             [$this, 'render_logs_page']
         );
-        error_log('DIT Integration: Logs submenu page added: ' . $logs_page);
+
 
         // Add login debug test submenu page
         $debug_page = add_submenu_page(
@@ -98,7 +83,7 @@ class Admin
             'dit-integration-login-debug',
             [$this, 'render_login_debug_page']
         );
-        error_log('DIT Integration: Login debug submenu page added: ' . $debug_page);
+
 
         // Add direct admin login submenu page
         $admin_login_page = add_submenu_page(
@@ -109,7 +94,7 @@ class Admin
             'dit-integration-admin-login',
             [$this, 'render_direct_admin_login_page']
         );
-        error_log('DIT Integration: Direct admin login submenu page added: ' . $admin_login_page);
+
 
 
 
@@ -122,7 +107,7 @@ class Admin
             'dit-integration-test-admin-auto-login',
             [$this, 'render_test_admin_auto_login_page']
         );
-        error_log('DIT Integration: Test admin auto login submenu page added: ' . $test_admin_auto_login_page);
+
 
         // Add test admin session check submenu page
         $test_admin_session_check_page = add_submenu_page(
@@ -133,21 +118,6 @@ class Admin
             'dit-integration-test-admin-session-check',
             [$this, 'render_test_admin_session_check_page']
         );
-        error_log('DIT Integration: Test admin session check submenu page added: ' . $test_admin_session_check_page);
-
-        error_log('DIT Integration: Admin menu added successfully');
-        error_log('DIT Integration: Adding admin menu - END');
-
-        // Debug: Check if menu was actually added
-        global $submenu;
-        if (isset($submenu['dit-integration'])) {
-            error_log('DIT Integration: Submenu items count: ' . count($submenu['dit-integration']));
-            foreach ($submenu['dit-integration'] as $item) {
-                error_log('DIT Integration: Menu item: ' . $item[0] . ' -> ' . $item[2]);
-            }
-        } else {
-            error_log('DIT Integration: WARNING - dit-integration submenu not found in global $submenu');
-        }
     }
 
     /**
@@ -226,15 +196,10 @@ class Admin
      */
     public function enqueue_scripts($hook)
     {
-        error_log('DIT Integration: enqueue_scripts called with hook: ' . $hook);
-
         // Only enqueue on our plugin's pages
         if (strpos($hook, 'dit-integration') === false) {
-            error_log('DIT Integration: Skipping script enqueue - not a plugin page');
             return;
         }
-
-        error_log('DIT Integration: Enqueuing admin.js');
 
         // Enqueue admin.js for all plugin pages
         wp_enqueue_script(
@@ -247,7 +212,6 @@ class Admin
 
         // Enqueue logs.js only on the logs page
         if ($hook === 'dit-integration_page_dit-integration-logs') {
-            error_log('DIT Integration: Enqueuing logs.js');
             wp_enqueue_script(
                 'dit-logs',
                 DIT_PLUGIN_URL . 'assets/js/logs.js',
@@ -266,7 +230,6 @@ class Admin
                 'testing' => __('Testing...', 'dit-integration'),
             ],
         ];
-        error_log('DIT Integration: Localizing admin.js with data: ' . json_encode($admin_data));
         wp_localize_script('dit-admin', 'ditAdmin', $admin_data);
 
         // Also localize for logs.js if on logs page
@@ -275,7 +238,6 @@ class Admin
                 'ajaxUrl' => admin_url('admin-ajax.php'),
                 'nonce' => wp_create_nonce('dit-admin-nonce'),
             ];
-            error_log('DIT Integration: Localizing logs.js with data: ' . json_encode($logs_data));
             wp_localize_script('dit-logs', 'ditAdmin', $logs_data);
         }
 
@@ -552,7 +514,7 @@ class Admin
      */
     public function sanitize_settings($input)
     {
-        error_log('DIT Integration: sanitize_settings called with input: ' . json_encode($input));
+
 
         $sanitized = [];
 
@@ -580,7 +542,6 @@ class Admin
         // Sanitize dashboard page ID
         $sanitized['dashboard_page_id'] = isset($input['dashboard_page_id']) ? (int)$input['dashboard_page_id'] : 0;
 
-        error_log('DIT Integration: Sanitized settings: ' . json_encode($sanitized));
         return $sanitized;
     }
 
@@ -589,18 +550,13 @@ class Admin
      */
     public function ajax_save_settings()
     {
-        error_log('DIT Integration: ajax_save_settings called');
-        error_log('DIT Integration: POST data: ' . json_encode($_POST));
-
         // Verify nonce
         if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'dit-admin-nonce')) {
-            error_log('DIT Integration: Nonce verification failed');
             wp_send_json_error(['message' => __('Security check failed.', 'dit-integration')]);
         }
 
         // Check permissions
         if (!current_user_can('manage_options')) {
-            error_log('DIT Integration: Permission check failed');
             wp_send_json_error(['message' => __('You do not have permission to save settings.', 'dit-integration')]);
         }
 
@@ -609,31 +565,23 @@ class Admin
         $settings = [];
         foreach ($settings_raw as $key => $value) {
             $settings[$key] = sanitize_text_field($value);
-            error_log('DIT Integration: Processing setting - ' . $key . ' = ' . $value);
         }
 
-        error_log('DIT Integration: Sanitized settings: ' . json_encode($settings));
-
         if (empty($settings)) {
-            error_log('DIT Integration: Settings array is empty!');
             wp_send_json_error(['message' => __('No settings received. Please check the form fields.', 'dit-integration')]);
         }
 
         // Get current settings
         $current_settings = get_option('dit_settings', []);
-        error_log('DIT Integration: Current settings: ' . json_encode($current_settings));
 
         // Merge with current settings
         $settings = array_merge($current_settings, $settings);
-        error_log('DIT Integration: Merged settings: ' . json_encode($settings));
 
         // Save settings
         $result = update_option('dit_settings', $settings);
-        error_log('DIT Integration: Settings update result: ' . ($result ? 'success' : 'failed'));
 
         // Verify settings were saved
         $saved_settings = get_option('dit_settings', []);
-        error_log('DIT Integration: Saved settings: ' . json_encode($saved_settings));
 
         // Send response
         if ($result || $saved_settings === $settings) {
@@ -681,28 +629,23 @@ class Admin
      */
     public function ajax_clear_logs()
     {
-        error_log('DIT Integration: ajax_clear_logs called');
-        error_log('DIT Integration: POST data: ' . json_encode($_POST));
+
 
         // Verify nonce
         if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'dit-admin-nonce')) {
-            error_log('DIT Integration: Nonce verification failed');
             wp_send_json_error(['message' => __('Security check failed.', 'dit-integration')]);
         }
 
         // Check permissions
         if (!current_user_can('manage_options')) {
-            error_log('DIT Integration: Permission check failed');
             wp_send_json_error(['message' => __('You do not have permission to clear logs.', 'dit-integration')]);
         }
 
         try {
             $logger = Core::get_instance()->logger;
             $logger->clear_logs();
-            error_log('DIT Integration: Logs cleared successfully');
             wp_send_json_success(['message' => __('Logs cleared successfully.', 'dit-integration')]);
         } catch (\Exception $e) {
-            error_log('DIT Integration: Failed to clear logs - ' . $e->getMessage());
             wp_send_json_error(['message' => $e->getMessage()]);
         }
     }
@@ -712,28 +655,21 @@ class Admin
      */
     public function ajax_get_logs()
     {
-        error_log('DIT Integration: ajax_get_logs called');
-        error_log('DIT Integration: POST data: ' . json_encode($_POST));
-
         // Verify nonce
         if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'dit-admin-nonce')) {
-            error_log('DIT Integration: Nonce verification failed');
             wp_send_json_error(['message' => __('Security check failed.', 'dit-integration')]);
         }
 
         // Check permissions
         if (!current_user_can('manage_options')) {
-            error_log('DIT Integration: Permission check failed');
             wp_send_json_error(['message' => __('You do not have permission to view logs.', 'dit-integration')]);
         }
 
         try {
             $logger = Core::get_instance()->logger;
             $logs = $logger->get_recent_logs(100);
-            error_log('DIT Integration: Logs retrieved successfully');
             wp_send_json_success(['logs' => $logs]);
         } catch (\Exception $e) {
-            error_log('DIT Integration: Failed to get logs - ' . $e->getMessage());
             wp_send_json_error(['message' => $e->getMessage()]);
         }
     }
@@ -1060,5 +996,4 @@ class Admin
         // Include the test admin session check script
         include_once(DIT_PLUGIN_DIR . 'admin/test-admin-session-check.php');
     }
-
 }

@@ -26,9 +26,7 @@ class Encryption
 
     public function init()
     {
-        if (!extension_loaded('openssl')) {
-            error_log('DIT Integration: OpenSSL extension is not available');
-        }
+        // Check OpenSSL extension
     }
 
     private function display_error(string $message, string $type = 'error'): void
@@ -38,10 +36,6 @@ class Encryption
                 echo '<div class="notice notice-' . esc_attr($type) . ' is-dismissible">';
                 echo '<p><strong>DIT Integration:</strong> ' . esc_html($message) . '</p>';
                 echo '</div>';
-            }
-
-            if (defined('WP_DEBUG_LOG') && WP_DEBUG_LOG) {
-                error_log('DIT Integration: ' . $message);
             }
         }
     }
@@ -161,32 +155,11 @@ class Encryption
     public function decrypt_with_aes(string $base64_encrypted, string $aes_key, string $base64_iv): string
     {
         try {
-            // Log parameters for debugging
-            error_log('DIT Integration: decrypt_with_aes called with:');
-            error_log('DIT Integration: - base64_encrypted length: ' . strlen($base64_encrypted));
-            error_log('DIT Integration: - aes_key length: ' . strlen($aes_key) . ' bytes');
-            error_log('DIT Integration: - aes_key preview: ' . substr($aes_key, 0, 20) . '...');
-            error_log('DIT Integration: - base64_iv: ' . $base64_iv);
 
-            // Add detailed key format analysis
-            error_log('DIT Integration: AES Key Format Analysis:');
-            error_log('DIT Integration: - Key length (strlen): ' . strlen($aes_key) . ' bytes');
-            error_log('DIT Integration: - Key length (mb_strlen 8bit): ' . mb_strlen($aes_key, '8bit') . ' bytes');
-            error_log('DIT Integration: - Is base64 encoded: ' . (base64_encode(base64_decode($aes_key, true)) === $aes_key ? 'YES' : 'NO'));
-            error_log('DIT Integration: - Is valid binary: ' . (mb_strlen($aes_key, '8bit') === strlen($aes_key) ? 'YES' : 'NO'));
-
-            // Add key hash for comparison and debugging
-            error_log('DIT Integration: AES Key Hash Analysis:');
-            error_log('DIT Integration: - Key MD5 hash: ' . md5($aes_key));
-            error_log('DIT Integration: - Key SHA256 hash: ' . hash('sha256', $aes_key));
-            error_log('DIT Integration: - Key hex representation: ' . bin2hex($aes_key));
 
             // Check if key is base64 encoded and decode if necessary
             if (base64_encode(base64_decode($aes_key, true)) === $aes_key) {
-                error_log('DIT Integration: WARNING - AES key is base64 encoded, decoding to binary');
                 $aes_key = base64_decode($aes_key);
-                error_log('DIT Integration: - Decoded key length: ' . strlen($aes_key) . ' bytes');
-                error_log('DIT Integration: - Decoded key MD5 hash: ' . md5($aes_key));
             }
 
             // Check AES key length - use mb_strlen for binary data
@@ -200,12 +173,7 @@ class Encryption
                 throw new Exception('Invalid IV format or length');
             }
 
-            // Log IV details
-            error_log('DIT Integration: IV Analysis:');
-            error_log('DIT Integration: - Base64 IV: ' . $base64_iv);
-            error_log('DIT Integration: - Binary IV length: ' . strlen($iv) . ' bytes');
-            error_log('DIT Integration: - IV hex representation: ' . bin2hex($iv));
-            error_log('DIT Integration: - IV MD5 hash: ' . md5($iv));
+
 
             // Decode encrypted data
             $encrypted = base64_decode($base64_encrypted);
@@ -213,24 +181,9 @@ class Encryption
                 throw new Exception('Invalid encrypted data format');
             }
 
-            // Log encrypted data details
-            error_log('DIT Integration: Encrypted Data Analysis:');
-            error_log('DIT Integration: - Base64 encrypted length: ' . strlen($base64_encrypted));
-            error_log('DIT Integration: - Binary encrypted length: ' . strlen($encrypted) . ' bytes');
-            error_log('DIT Integration: - Encrypted data MD5 hash: ' . md5($encrypted));
 
-            // Log OpenSSL configuration
-            error_log('DIT Integration: OpenSSL Configuration:');
-            error_log('DIT Integration: - OpenSSL version: ' . OPENSSL_VERSION_TEXT);
-            error_log('DIT Integration: - Available ciphers: ' . implode(', ', openssl_get_cipher_methods()));
-            error_log('DIT Integration: - AES-256-CBC available: ' . (in_array('AES-256-CBC', openssl_get_cipher_methods()) ? 'YES' : 'NO'));
 
-            // Attempt decryption with detailed error logging
-            error_log('DIT Integration: Starting AES-256-CBC decryption...');
-            error_log('DIT Integration: - Algorithm: AES-256-CBC');
-            error_log('DIT Integration: - Key length: ' . strlen($aes_key) . ' bytes');
-            error_log('DIT Integration: - IV length: ' . strlen($iv) . ' bytes');
-            error_log('DIT Integration: - Encrypted data length: ' . strlen($encrypted) . ' bytes');
+
 
             $decrypted = openssl_decrypt(
                 $encrypted,
@@ -247,18 +200,8 @@ class Encryption
                     $openssl_errors[] = $error;
                 }
 
-                error_log('DIT Integration: OpenSSL Decryption Failed:');
-                error_log('DIT Integration: - Error count: ' . count($openssl_errors));
-                foreach ($openssl_errors as $index => $error) {
-                    error_log('DIT Integration: - Error ' . ($index + 1) . ': ' . $error);
-                }
-
                 throw new Exception('AES decryption failed: ' . implode('; ', $openssl_errors));
             }
-
-            error_log('DIT Integration: decrypt_with_aes successful, decrypted length: ' . strlen($decrypted));
-            error_log('DIT Integration: decrypted preview: ' . substr($decrypted, 0, 100) . '...');
-            error_log('DIT Integration: - Decrypted data MD5 hash: ' . md5($decrypted));
 
             return $decrypted;
         } catch (Exception $e) {
@@ -587,7 +530,7 @@ class Encryption
             ];
 
             // For debugging: log the structure of the created object
-            error_log('DIT Integration: Created hybrid encryption payload with keys: ' . implode(', ', array_keys($encrypted_object)));
+
 
             return $encrypted_object;
         } catch (Exception $e) {
